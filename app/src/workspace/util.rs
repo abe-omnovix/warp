@@ -391,6 +391,11 @@ pub fn get_terminal_background_fill(
     theme.background().with_opacity(terminal_opacity).into()
 }
 
+/// Terminal fill opacity while a browser underlay is attached, until per-pane
+/// glass opacity lands: mostly opaque so terminal text stays legible, with the
+/// underlay visible behind it.
+const BROWSER_UNDERLAY_GLASS_OPACITY: u8 = 85;
+
 fn get_terminal_background_opacity(window_id: WindowId, app: &AppContext) -> u8 {
     let theme = Appearance::as_ref(app).theme();
     let background_opacity = WindowSettings::as_ref(app)
@@ -402,6 +407,10 @@ fn get_terminal_background_opacity(window_id: WindowId, app: &AppContext) -> u8 
             let opacity_ratio = background_opacity as f32 / 100.;
             // Scale the overlay opacity with the background opacity ratio.
             (((100 - img.opacity) as f32) * opacity_ratio) as u8
+        }
+        _ if crate::browser_underlay::BrowserUnderlayState::as_ref(app).is_attached(window_id) => {
+            let opacity_ratio = background_opacity as f32 / 100.;
+            (BROWSER_UNDERLAY_GLASS_OPACITY as f32 * opacity_ratio) as u8
         }
         _ => background_opacity,
     }

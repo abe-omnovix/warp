@@ -244,6 +244,7 @@ use crate::banner::BannerState;
 use crate::billing::shared_objects_creation_denied_modal::{
     SharedObjectsCreationDeniedModal, SharedObjectsCreationDeniedModalEvent,
 };
+use crate::browser_underlay::BrowserUnderlayState;
 use crate::changelog_model::{ChangelogModel, ChangelogRequestType, Event as ChangelogEvent};
 use crate::channel::{Channel, ChannelState};
 use crate::cloud_object::model::persistence::CloudModel;
@@ -27595,6 +27596,13 @@ impl View for Workspace {
                     )
                     .finish(),
                 );
+                stack.add_child(workspace.finish());
+            }
+            // With a browser underlay attached, the native webview behind the
+            // Metal surface plays the role of the background image: leave the
+            // workspace background unpainted so the underlay shows through the
+            // terminals' translucent glass fill.
+            _ if BrowserUnderlayState::as_ref(app).is_attached(self.window_id) => {
                 stack.add_child(workspace.finish());
             }
             _ => {

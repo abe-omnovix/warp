@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::ffi::c_void;
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::path::Path;
 use std::ptr;
 use std::rc::Rc;
@@ -28,8 +28,9 @@ use warpui_core::actions::StandardAction;
 use warpui_core::r#async::{Timer, executor};
 use warpui_core::event::ModifiersState;
 use warpui_core::platform::{
-    self, FilePickerCallback, FilePickerConfiguration, FullscreenState, GraphicsBackend,
-    TerminationMode, WindowBounds, WindowFocusBehavior, WindowOptions, WindowStyle, file_picker,
+    self, BrowserJsEvalCallback, BrowserSnapshotCallback, FilePickerCallback,
+    FilePickerConfiguration, FullscreenState, GraphicsBackend, TerminationMode, WindowBounds,
+    WindowFocusBehavior, WindowOptions, WindowStyle, file_picker,
 };
 use warpui_core::rendering::GPUPowerPreference;
 use warpui_core::windowing::WindowCallbacks;
@@ -150,6 +151,39 @@ impl platform::WindowManager for WindowManager {
 
     fn set_all_windows_background_blur_texture(&self, _use_blur_texture: bool) {
         // no-op on MacOS. This is only available on Windows.
+    }
+
+    fn attach_background_webview(&self, window_id: WindowId, url: &str) -> bool {
+        Window::attach_background_webview(window_id, url)
+    }
+
+    fn background_webview_attached(&self, window_id: WindowId) -> bool {
+        Window::background_webview_attached(window_id)
+    }
+
+    fn navigate_background_webview(&self, window_id: WindowId, url: &str) {
+        Window::navigate_background_webview(window_id, url)
+    }
+
+    fn eval_background_webview_js(
+        &self,
+        window_id: WindowId,
+        js: &str,
+        callback: BrowserJsEvalCallback,
+    ) {
+        Window::eval_background_webview_js(window_id, js, callback)
+    }
+
+    fn snapshot_background_webview(&self, window_id: WindowId, callback: BrowserSnapshotCallback) {
+        Window::snapshot_background_webview(window_id, callback)
+    }
+
+    fn set_background_webview_interactive(&self, window_id: WindowId, interactive: bool) {
+        Window::set_background_webview_interactive(window_id, interactive)
+    }
+
+    fn detach_background_webview(&self, window_id: WindowId) {
+        Window::detach_background_webview(window_id)
     }
 
     fn set_window_title(&self, window_id: WindowId, title: &str) {
@@ -475,6 +509,78 @@ unsafe extern "C" {
     );
     fn open_url(urlString: &NSString) -> Bool;
     fn set_titlebar_height(window: &NSWindow, height: f64);
+    fn warp_host_view_for_window(window: &NSWindow) -> *mut NSView;
+    fn browser_underlay_attach(window: &NSWindow, url: *const c_char) -> Bool;
+    fn browser_underlay_for_window(window: &NSWindow) -> *mut NSView;
+    fn browser_underlay_navigate(window: &NSWindow, url: *const c_char);
+    fn browser_underlay_eval(
+        window: &NSWindow,
+        js: *const c_char,
+        ctx: *mut c_void,
+        callback: BrowserUnderlayStringCallback,
+    );
+    fn browser_underlay_snapshot(
+        window: &NSWindow,
+        ctx: *mut c_void,
+        callback: BrowserUnderlayDataCallback,
+    );
+    fn browser_underlay_set_interactive(window: &NSWindow, interactive: Bool);
+    fn browser_underlay_detach(window: &NSWindow);
+}
+
+/// C-side callback signature for JavaScript evaluation results; see
+/// `browser_underlay.h`. Exactly one of `result`/`error` is non-null and the
+/// strings are only valid for the duration of the call.
+type BrowserUnderlayStringCallback =
+    extern "C" fn(ctx: *mut c_void, result: *const c_char, error: *const c_char);
+
+/// C-side callback signature for PNG snapshot bytes; see `browser_underlay.h`.
+type BrowserUnderlayDataCallback =
+    extern "C" fn(ctx: *mut c_void, bytes: *const u8, len: usize, error: *const c_char);
+
+extern "C" fn browser_eval_trampoline(
+    ctx: *mut c_void,
+    result: *const c_char,
+    error: *const c_char,
+) {
+    // SAFETY: `ctx` is the boxed callback passed to `browser_underlay_eval`,
+    // which invokes this trampoline exactly once; the strings live for the
+    // duration of the call.
+    let callback = unsafe { Box::from_raw(ctx as *mut BrowserJsEvalCallback) };
+    let outcome = if error.is_null() {
+        // SAFETY: per the C contract, `result` is non-null when `error` is null.
+        Ok(unsafe { CStr::from_ptr(result) }
+            .to_string_lossy()
+            .into_owned())
+    } else {
+        // SAFETY: `error` was just checked to be non-null.
+        Err(unsafe { CStr::from_ptr(error) }
+            .to_string_lossy()
+            .into_owned())
+    };
+    callback(outcome);
+}
+
+extern "C" fn browser_snapshot_trampoline(
+    ctx: *mut c_void,
+    bytes: *const u8,
+    len: usize,
+    error: *const c_char,
+) {
+    // SAFETY: `ctx` is the boxed callback passed to `browser_underlay_snapshot`,
+    // which invokes this trampoline exactly once; the buffer and error string
+    // live for the duration of the call.
+    let callback = unsafe { Box::from_raw(ctx as *mut BrowserSnapshotCallback) };
+    let outcome = if error.is_null() {
+        // SAFETY: per the C contract, `bytes` is non-null when `error` is null.
+        Ok(unsafe { std::slice::from_raw_parts(bytes, len) }.to_vec())
+    } else {
+        // SAFETY: `error` was just checked to be non-null.
+        Err(unsafe { CStr::from_ptr(error) }
+            .to_string_lossy()
+            .into_owned())
+    };
+    callback(outcome);
 }
 
 pub type FrameCaptureCallback = Box<dyn FnOnce(platform::CapturedFrame) + Send + 'static>;
@@ -594,9 +700,11 @@ impl Window {
                 let _: () = unsafe { msg_send![native_window_ref, enqueueFullscreenTransition] };
             }
 
-            let native_view = native_window_ref
-                .contentView()
-                .expect("WarpWindow always has a content view");
+            // The Metal device renders into the host view's backing layer; the
+            // content view itself may be a plain container (see window.m).
+            // SAFETY: `warp_host_view_for_window` returns the window's host view.
+            let native_view = unsafe { warp_host_view_for_window(native_window_ref).as_ref() }
+                .expect("WarpWindow always has a host view");
 
             let device = match metal_device {
                 Some(metal_device) => Some(Device::new(
@@ -725,12 +833,12 @@ impl Window {
     }
 
     fn send_close_ime_msg(native_window: &NSWindow) {
-        // SAFETY: warp windows carry the window-state ivar, and the content view is a
+        // SAFETY: warp windows carry the window-state ivar, and the host view is a
         // WarpHostView exposing the custom `closeIMEAsync` selector.
         unsafe {
             let state = get_window_state(as_objc_object(native_window));
-            if let Some(view) = (*state.native_window).contentView() {
-                let _: () = msg_send![&*view, closeIMEAsync];
+            if let Some(view) = warp_host_view_for_window(&*state.native_window).as_ref() {
+                let _: () = msg_send![view, closeIMEAsync];
             }
         }
     }
@@ -855,6 +963,105 @@ impl Window {
                     );
                 }
             });
+        }
+    }
+
+    /// Attaches a browser underlay to the window (behind the Metal surface)
+    /// and starts loading `url`. Returns false if the window cannot host an
+    /// underlay (e.g. it is a panel) or was not found.
+    pub fn attach_background_webview(window_id: WindowId, url: &str) -> bool {
+        let Ok(url) = CString::new(url) else {
+            return false;
+        };
+        // SAFETY: `find_window_with_id` / `browser_underlay_attach` are FFI calls.
+        unsafe {
+            match Self::find_window_with_id(window_id) {
+                Some(window) => browser_underlay_attach(&window, url.as_ptr()).as_bool(),
+                None => false,
+            }
+        }
+    }
+
+    /// Returns whether the window currently has a browser underlay attached.
+    pub fn background_webview_attached(window_id: WindowId) -> bool {
+        // SAFETY: `find_window_with_id` / `browser_underlay_for_window` are FFI calls.
+        unsafe {
+            match Self::find_window_with_id(window_id) {
+                Some(window) => !browser_underlay_for_window(&window).is_null(),
+                None => false,
+            }
+        }
+    }
+
+    /// Navigates the window's browser underlay to `url`. Noops if no underlay
+    /// is attached.
+    pub fn navigate_background_webview(window_id: WindowId, url: &str) {
+        let Ok(url) = CString::new(url) else {
+            return;
+        };
+        // SAFETY: `find_window_with_id` / `browser_underlay_navigate` are FFI calls.
+        unsafe {
+            if let Some(window) = Self::find_window_with_id(window_id) {
+                browser_underlay_navigate(&window, url.as_ptr());
+            }
+        }
+    }
+
+    /// Evaluates `js` in the window's browser underlay. The callback is always
+    /// invoked exactly once, with an error if no underlay is attached.
+    pub fn eval_background_webview_js(
+        window_id: WindowId,
+        js: &str,
+        callback: BrowserJsEvalCallback,
+    ) {
+        let (Some(window), Ok(js)) =
+            // SAFETY: `find_window_with_id` is an FFI call.
+            (unsafe { Self::find_window_with_id(window_id) }, CString::new(js))
+        else {
+            callback(Err("window not found or invalid JavaScript string".to_owned()));
+            return;
+        };
+        let ctx = Box::into_raw(Box::new(callback)) as *mut c_void;
+        // SAFETY: `browser_underlay_eval` consumes the callback box through the
+        // trampoline exactly once.
+        unsafe {
+            browser_underlay_eval(&window, js.as_ptr(), ctx, browser_eval_trampoline);
+        }
+    }
+
+    /// Captures a PNG snapshot of the window's browser underlay. The callback
+    /// is always invoked exactly once, with an error if no underlay is attached.
+    pub fn snapshot_background_webview(window_id: WindowId, callback: BrowserSnapshotCallback) {
+        // SAFETY: `find_window_with_id` is an FFI call.
+        let Some(window) = (unsafe { Self::find_window_with_id(window_id) }) else {
+            callback(Err("window not found".to_owned()));
+            return;
+        };
+        let ctx = Box::into_raw(Box::new(callback)) as *mut c_void;
+        // SAFETY: `browser_underlay_snapshot` consumes the callback box through
+        // the trampoline exactly once.
+        unsafe {
+            browser_underlay_snapshot(&window, ctx, browser_snapshot_trampoline);
+        }
+    }
+
+    /// Toggles whether mouse/keyboard events reach the browser underlay.
+    pub fn set_background_webview_interactive(window_id: WindowId, interactive: bool) {
+        // SAFETY: `find_window_with_id` / `browser_underlay_set_interactive` are FFI calls.
+        unsafe {
+            if let Some(window) = Self::find_window_with_id(window_id) {
+                browser_underlay_set_interactive(&window, Bool::new(interactive));
+            }
+        }
+    }
+
+    /// Removes the window's browser underlay, stopping any media playback.
+    pub fn detach_background_webview(window_id: WindowId) {
+        // SAFETY: `find_window_with_id` / `browser_underlay_detach` are FFI calls.
+        unsafe {
+            if let Some(window) = Self::find_window_with_id(window_id) {
+                browser_underlay_detach(&window);
+            }
         }
     }
 
@@ -1114,10 +1321,9 @@ impl WindowState {
 
     /// Returns the window's backing `CAMetalLayer`.
     pub fn metal_layer(&self) -> Retained<CAMetalLayer> {
-        let view = self
-            .window()
-            .contentView()
-            .expect("WarpHostView content view");
+        // SAFETY: `warp_host_view_for_window` returns the window's host view.
+        let view = unsafe { warp_host_view_for_window(self.window()).as_ref() }
+            .expect("WarpWindow always has a host view");
         let layer = view
             .layer()
             .expect("WarpHostView always has a backing layer");

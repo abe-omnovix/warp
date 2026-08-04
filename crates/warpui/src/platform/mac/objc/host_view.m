@@ -521,3 +521,16 @@ void warp_marked_text_cleared(WarpHostView *);
 }
 
 @end
+
+WarpHostView *warp_host_view_for_window(NSWindow *window) {
+    NSView *contentView = window.contentView;
+    if ([contentView isKindOfClass:[WarpHostView class]]) {
+        return (WarpHostView *)contentView;
+    }
+    for (NSView *subview in contentView.subviews) {
+        if ([subview isKindOfClass:[WarpHostView class]]) {
+            return (WarpHostView *)subview;
+        }
+    }
+    return nil;
+}

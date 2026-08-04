@@ -935,11 +935,13 @@ pub(crate) fn open_new_with_workspace_source(
     let global_resource_handles = GlobalResourceHandlesProvider::as_ref(ctx).get().clone();
     let window_settings = WindowSettings::as_ref(ctx);
     let options = default_window_options(window_settings, ctx);
-    ctx.add_window(options, |ctx| {
+    let (window_id, root_view) = ctx.add_window(options, |ctx| {
         let mut view = RootView::new(global_resource_handles, source, ctx);
         view.focus(ctx);
         view
-    })
+    });
+    crate::browser_underlay::maybe_attach_test_underlay(window_id, ctx);
+    (window_id, root_view)
 }
 
 pub(crate) fn open_new_from_path(

@@ -135,7 +135,7 @@ NSNumber *previouslyActiveAppPID;
 
 - (void)windowWillStartLiveResize:(NSNotification *)notification {
     WarpWindow *warp_window = notification.object;
-    WarpHostView *warp_view = warp_window.contentView;
+    WarpHostView *warp_view = warp_host_view_for_window(warp_window);
 
     // This is a hack to get around `borrowMut` errors within the UI framework
     // caused by the fact that it incorrectly assumes that callbacks cannot
@@ -152,7 +152,7 @@ NSNumber *previouslyActiveAppPID;
 
 - (void)windowDidEndLiveResize:(NSNotification *)notification {
     WarpWindow *warp_window = notification.object;
-    WarpHostView *warp_view = warp_window.contentView;
+    WarpHostView *warp_view = warp_host_view_for_window(warp_window);
 
     // Reset state changed in `windowWillStartLiveResize`.
     [warp_view setAsyncCallback:YES];
@@ -468,10 +468,10 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
                 if (_leftMouseDownStartedInNativeWindowChrome) {
                     [super sendEvent:event];
                 } else {
-                    [self.contentView mouseUp:event];
+                    [warp_host_view_for_window(self) mouseUp:event];
                 }
             } else {
-                [self.contentView mouseUp:event];
+                [warp_host_view_for_window(self) mouseUp:event];
             }
             _leftMouseDownStartedInNativeWindowChrome = NO;
             break;
@@ -480,10 +480,10 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
                 if (_leftMouseDownStartedInNativeWindowChrome) {
                     [super sendEvent:event];
                 } else {
-                    [self.contentView mouseDragged:event];
+                    [warp_host_view_for_window(self) mouseDragged:event];
                 }
             } else {
-                [self.contentView mouseDragged:event];
+                [warp_host_view_for_window(self) mouseDragged:event];
             }
             break;
 
@@ -492,7 +492,7 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
         // locally, though it is unclear why. This breaks the right-click context menu for tabs on
         // local builds, so we propagate the RightMouseDown event manually.
         case NSEventTypeRightMouseDown:
-            [self.contentView rightMouseDown:event];
+            [warp_host_view_for_window(self) rightMouseDown:event];
             break;
         default:
             [super sendEvent:event];
@@ -507,9 +507,9 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
 }
 
 - (void)setNeedsDisplayAsync {
-    NSView *contentView = [self contentView];
+    NSView *hostView = warp_host_view_for_window(self);
     dispatch_async(dispatch_get_main_queue(), ^{
-      [contentView setNeedsDisplay:YES];
+      [hostView setNeedsDisplay:YES];
     });
 }
 
@@ -522,7 +522,7 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
         // keyDownImpl and Rust suppresses the keystroke (composing mode), we return NO, and AppKit
         // proceeds to call keyDown: — running interpretKeyEvents a second time for the same event.
         // See #9709.
-        if ([(WarpHostView *)self.contentView hasMarkedText]) {
+        if ([warp_host_view_for_window(self) hasMarkedText]) {
             return [super performKeyEquivalent:event];
         }
 
@@ -536,7 +536,7 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
         BOOL triggersCustomAction = warp_app_has_custom_action_for_keystroke(application, event);
 
         if (keyBindingsDisabled || (keystrokeIsAssigned && !triggersCustomAction)) {
-            if ([self.contentView keyDownImpl:event]) {
+            if ([warp_host_view_for_window(self) keyDownImpl:event]) {
                 return YES;
             }
         }
@@ -694,9 +694,9 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
 }
 
 - (void)setNeedsDisplayAsync {
-    NSView *contentView = [self contentView];
+    NSView *hostView = warp_host_view_for_window(self);
     dispatch_async(dispatch_get_main_queue(), ^{
-      [contentView setNeedsDisplay:YES];
+      [hostView setNeedsDisplay:YES];
     });
 }
 
@@ -855,7 +855,16 @@ id create_warp_nswindow(NSRect contentRect, id metalDevice, BOOL hideTitleBar,
 
     attach_warp_window_delegate(window);
 
-    window.contentView = hostView;
+    // The content view is a plain container with the host view as a full-size
+    // subview (rather than the host view directly) so that sibling views can
+    // be composited *behind* the Metal surface — see browser_underlay.h. Use
+    // warp_host_view_for_window to reach the host view from a window.
+    NSView *container = [[[NSView alloc] initWithFrame:contentRect] autorelease];
+    hostView.frame = container.bounds;
+    hostView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [container addSubview:hostView];
+
+    window.contentView = container;
     [window makeFirstResponder:hostView];
     set_window_background_blur_radius(window, backgroundBlurRadiusPixels);
     [pool release];

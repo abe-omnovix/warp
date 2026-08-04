@@ -469,6 +469,7 @@ embed-resource = "3.0"
 [features]
 tui = ["warpui_core/tui"]
 ai_resume_button = []
+browser_underlay = []
 autoupdate = []
 figma_detection = []
 bundled_skills = []

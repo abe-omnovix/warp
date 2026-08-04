@@ -16,3 +16,9 @@
 - (void)setPresentsWithTransaction:(BOOL)presentsWithTransaction;
 - (BOOL)keyDownImpl:(NSEvent *)event;
 @end
+
+/// Returns the WarpHostView backing `window`. The host view is either the
+/// window's content view directly (panels) or a subview of a plain container
+/// content view (windows that can host a browser underlay behind the Metal
+/// surface). Returns nil for non-Warp windows.
+WarpHostView *warp_host_view_for_window(NSWindow *window);

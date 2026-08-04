@@ -939,6 +939,12 @@ pub enum FeatureFlag {
     /// between credits and dollars. When disabled (prod/stable), the footer
     /// falls back to a static, non-interactive credits total.
     TuiCostTransparency,
+
+    /// Gates the browser background underlay: a WKWebView composited behind
+    /// the terminal (ambient video backgrounds), per-pane "night glass"
+    /// translucency, and the `browser.*` local-control actions that let
+    /// agents drive the underlay. macOS only.
+    BrowserUnderlay,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -1014,6 +1020,8 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::WellKnownMcpIds,
     FeatureFlag::FactoryMcp,
     FeatureFlag::TuiCostTransparency,
+    #[cfg(target_os = "macos")]
+    FeatureFlag::BrowserUnderlay,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Warp).

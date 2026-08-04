@@ -549,6 +549,14 @@ pub enum WindowFocusBehavior {
     RetainZIndex,
 }
 
+/// Callback invoked (on the main thread, exactly once) with the result of a
+/// background-webview JavaScript evaluation.
+pub type BrowserJsEvalCallback = Box<dyn FnOnce(Result<String, String>) + 'static>;
+
+/// Callback invoked (on the main thread, exactly once) with the PNG bytes of a
+/// background-webview snapshot.
+pub type BrowserSnapshotCallback = Box<dyn FnOnce(Result<Vec<u8>, String>) + 'static>;
+
 /// Common interface for abstracting platform-specific windowing logic.
 pub trait WindowManager {
     fn open_window(
@@ -590,6 +598,49 @@ pub trait WindowManager {
     /// window during a drag without triggering AppKit's `orderOut:` machinery.
     /// Default is a no-op on platforms that don't support per-window alpha.
     fn set_window_alpha(&self, _window_id: WindowId, _alpha: f32) {}
+
+    /// Attaches a browser webview behind the window's terminal surface and
+    /// starts loading `url`. Returns false when the window was not found or
+    /// the platform does not support background webviews (currently all
+    /// platforms but macOS, where the default no-op is overridden).
+    fn attach_background_webview(&self, _window_id: WindowId, _url: &str) -> bool {
+        false
+    }
+
+    /// Returns whether the window currently has a background webview attached.
+    fn background_webview_attached(&self, _window_id: WindowId) -> bool {
+        false
+    }
+
+    /// Navigates the window's background webview to `url`, if one is attached.
+    fn navigate_background_webview(&self, _window_id: WindowId, _url: &str) {}
+
+    /// Evaluates `js` in the window's background webview. The callback is
+    /// always invoked exactly once, on the main thread.
+    fn eval_background_webview_js(
+        &self,
+        _window_id: WindowId,
+        _js: &str,
+        callback: BrowserJsEvalCallback,
+    ) {
+        callback(Err(
+            "background webviews are not supported on this platform".to_owned(),
+        ));
+    }
+
+    /// Captures a PNG snapshot of the window's background webview. The
+    /// callback is always invoked exactly once, on the main thread.
+    fn snapshot_background_webview(&self, _window_id: WindowId, callback: BrowserSnapshotCallback) {
+        callback(Err(
+            "background webviews are not supported on this platform".to_owned(),
+        ));
+    }
+
+    /// Toggles whether input events reach the window's background webview.
+    fn set_background_webview_interactive(&self, _window_id: WindowId, _interactive: bool) {}
+
+    /// Removes the window's background webview, stopping any media playback.
+    fn detach_background_webview(&self, _window_id: WindowId) {}
 
     /// Sets the background blur radius for all windows to the given `blur_radius_pixels` value.
     fn set_all_windows_background_blur_radius(&self, blur_radius_pixels: u8);
