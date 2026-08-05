@@ -144,6 +144,29 @@ BOOL browser_underlay_attach(NSWindow *window, const char *url) {
                                     injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                                  forMainFrameOnly:NO] autorelease];
         [configuration.userContentController addUserScript:fakeFullscreen];
+        // While inert, the page must not react to the pointer at all:
+        // WebKit's mouse tracking follows the cursor irrespective of the
+        // native hit-test gating, so hover UI (video controls, tooltips)
+        // would appear under the terminal. Pages start with pointer-events
+        // disabled; `browser_underlay_set_interactive` toggles it via
+        // `__warpSetInteractive`. (A page navigated while interactive stays
+        // inert until the next toggle — acceptable, the gesture re-runs it.)
+        NSString *pointerGuardShim = @""
+            "(function () {\n"
+            "  if (window.__warpPointerGuard) { return; }\n"
+            "  window.__warpPointerGuard = true;\n"
+            "  window.__warpSetInteractive = function (on) {\n"
+            "    try {\n"
+            "      document.documentElement.style.pointerEvents = on ? '' : 'none';\n"
+            "    } catch (e) {}\n"
+            "  };\n"
+            "  window.__warpSetInteractive(false);\n"
+            "})();";
+        WKUserScript *pointerGuard =
+            [[[WKUserScript alloc] initWithSource:pointerGuardShim
+                                    injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                 forMainFrameOnly:NO] autorelease];
+        [configuration.userContentController addUserScript:pointerGuard];
 
         underlay = [[[WarpBrowserUnderlayView alloc] initWithFrame:container.bounds
                                                      configuration:configuration] autorelease];
@@ -255,6 +278,12 @@ void browser_underlay_set_interactive(NSWindow *window, BOOL interactive) {
         // Return key focus to the host view so typing lands in the terminal.
         [window makeFirstResponder:warp_host_view_for_window(window)];
     }
+    // Let the page see the pointer only while interactive (see the
+    // pointer-guard user script installed at attach).
+    NSString *pointerJs = interactive
+                              ? @"window.__warpSetInteractive && window.__warpSetInteractive(true);"
+                              : @"window.__warpSetInteractive && window.__warpSetInteractive(false);";
+    [underlay evaluateJavaScript:pointerJs completionHandler:nil];
 }
 
 // --- Interactive-mode hotkeys ------------------------------------------------
