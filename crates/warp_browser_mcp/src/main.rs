@@ -403,11 +403,15 @@ impl BrowserMcpServer {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for BrowserMcpServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Drives the browser underlay rendered behind the Warp terminal pane this server is \
-             bound to. Requires a running Warp instance with the browser-underlay feature and \
-             the allow_browser_control permission (Settings > Scripting) enabled.",
-        )
+        let mut info = ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_instructions(
+                "Drives the browser underlay rendered behind the Warp terminal pane this server \
+                 is bound to. Requires a running Warp instance with the browser-underlay feature \
+                 and the allow_browser_control permission (Settings > Scripting) enabled.",
+            );
+        info.server_info.name = "warp-browser-mcp".to_owned();
+        info.server_info.version = env!("CARGO_PKG_VERSION").to_owned();
+        info
     }
 }
 
