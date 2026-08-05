@@ -96,19 +96,22 @@ view geometry mirroring. Per-pane *webviews* are Phase 5.
    `--pane-session-uuid` → `WARP_TERMINAL_SESSION_UUID` env → active pane.
 5. **Partially shipped: interactive-mode hotkeys + indicator.** A local
    NSEvent monitor (installed with the first attach; local monitors see
-   events before the first responder, so the exit gestures work while the
-   webview owns keys) recognizes ⌘⇧B (toggle latched interactive), Globe/Fn
-   held ≥150 ms (momentary interactive while held; the grace period keeps
-   Fn-combos like fn+arrows in the terminal), and ⌘Esc (force off). Gestures
-   flow platform → `AppCallbacks::on_browser_underlay_hotkey` →
+   events before the first responder, so the gestures work while the
+   webview owns keys) recognizes F18 — produced by an OS-level
+   CapsLock→F18 remap, see README — tap toggles latched interactive, held
+   >300 ms is momentary interactive-while-held; ⌘Esc always force-exits.
+   (First cut used ⌘⇧B + Globe/Fn hold: rejected — chord collided with app
+   bindings and bare-Fn `flagsChanged` is unreliable across keyboards; a
+   dedicated non-modifier key gives clean down/up pairs.) Gestures flow
+   platform → `AppCallbacks::on_browser_underlay_hotkey` →
    `browser_underlay::handle_hotkey`, so the app model stays the single
    owner of interactive state (`interactive` latched ‖ `interactive_hold`
    momentary). While effectively interactive the workspace draws a 2px
    accent border. Still later: per-pane webview rects (mirror
    `PaneId::position_id()` → `element_position_by_id` geometry into native
    view frames, or Route B frame-push via `AssetSource::Raw` for
-   cross-platform); rebindable hotkey chords (the chords are currently
-   fixed in the ObjC monitor).
+   cross-platform); rebindable gesture key (currently fixed to F18 in the
+   ObjC monitor).
 
 ## Known risks
 

@@ -44,17 +44,28 @@ it independently.)
 
 ## Interacting with the page yourself
 
-The underlay never steals input by default. Three gestures flip that,
-window-locally, whenever an underlay is attached:
+The underlay never steals input by default. The gesture key is **F18** — a
+key no physical keyboard has, so it can't collide with any app binding —
+meant to be produced by remapping CapsLock at the OS level:
 
-- **⌘⇧B** — toggle interactive mode (input goes to the page until toggled
-  back; an accent border marks the mode).
-- **Hold Globe/Fn** — interactive only while held; release snaps input back
-  to the terminal. Quick Fn-combos (fn+arrows) stay in the terminal.
+```bash
+# CapsLock emits F18 (reversible; resets on reboot):
+hidutil property --set '{"UserKeyMapping":[{"HIDKeyboardModifierMappingSrc":0x700000039,"HIDKeyboardModifierMappingDst":0x70000006D}]}'
+# undo:
+hidutil property --set '{"UserKeyMapping":[]}'
+```
+
+With that in place, in any window with an underlay attached:
+
+- **Tap CapsLock** — toggle interactive mode (input goes to the page until
+  toggled back; an accent border marks the mode).
+- **Hold CapsLock** (>300ms) — interactive only while held; release snaps
+  input back to the terminal.
 - **⌘Esc** — always returns to the terminal, clearing both modes.
 
-Fancy a different key (e.g. CapsLock-as-hold)? Remap CapsLock to the Globe
-key at the OS level (`hidutil` / Karabiner) and the hold gesture follows.
+Note the remap takes CapsLock away from everything else (caps-locking
+included) system-wide while active; Karabiner-Elements can scope it if that
+matters.
 
 ## Quickstart: agent browsing via MCP
 

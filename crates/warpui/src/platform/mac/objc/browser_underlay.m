@@ -163,45 +163,43 @@ void browser_underlay_set_interactive(NSWindow *window, BOOL interactive) {
 //
 // A single app-local NSEvent monitor recognizes the interactive-mode gestures.
 // A local monitor sees events *before* they are dispatched to the first
-// responder, which is what makes the exit chord work while the webview owns
-// key events. The monitor only recognizes gestures; the application flips
+// responder, which is what makes the gestures work while the webview owns key
+// events. The monitor only recognizes gestures; the application flips
 // interactive state in response to the callback, staying the single owner of
 // that state.
+//
+// The gesture key is F18 — a key no physical keyboard emits — intended to be
+// produced by remapping CapsLock to F18 at the OS level (hidutil/Karabiner):
+//   tap F18            -> toggle latched interactive mode
+//   hold F18 (>300ms)  -> interactive while held, back on release
+//   Cmd+Esc            -> always return to the terminal
+// A dedicated non-modifier key gives clean down/up pairs (unlike CapsLock or
+// Globe/Fn themselves) and cannot collide with app keybindings.
 
 static void *hotkey_ctx = NULL;
 static BrowserUnderlayHotkeyCallback hotkey_callback = NULL;
 static id hotkey_monitor = nil;
 
-// Momentary-hold state. `hold_pending` is set between the hold modifier going
-// down and the grace period elapsing; `hold_generation` invalidates a pending
-// activation when the modifier is released (or a combo key is pressed) before
-// the grace period fires.
-static BOOL hold_pending = NO;
-static BOOL hold_active = NO;
-static uint64_t hold_generation = 0;
-static NSWindow *hold_window = nil; // retained while pending or active
+// F18 tap-vs-hold state. `hotkey_generation` invalidates the scheduled
+// hold-activation when the key is released (a tap) before the threshold.
+static BOOL f18_down = NO;
+static BOOL f18_hold_active = NO;
+static uint64_t hotkey_generation = 0;
+static NSWindow *f18_window = nil; // retained while the key is down
 
-static const unsigned short kKeyCodeB = 11;
 static const unsigned short kKeyCodeEscape = 53;
-static const unsigned short kKeyCodeFunction = 63;
+static const unsigned short kKeyCodeF18 = 79;
 
-// Delay before a held Globe/Fn key becomes "interactive while held". Pressing
-// any key inside the grace period cancels activation, so Fn-combos (fn+arrows
-// for paging, fn-function-keys) keep going to the terminal.
-static const int64_t kHoldGraceMs = 150;
+// Held longer than this, F18 is a hold-to-interact; released sooner, a tap
+// that toggles latched interactive mode.
+static const int64_t kTapMaxMs = 300;
 
-static void hotkey_set_hold_window(NSWindow *window) {
-    if (hold_window != window) {
-        [hold_window release];
-        hold_window = [window retain];
-    }
-}
-
-static void hotkey_clear_hold(void) {
-    hold_pending = NO;
-    hold_generation += 1;
-    [hold_window release];
-    hold_window = nil;
+static void hotkey_clear_f18(void) {
+    f18_down = NO;
+    f18_hold_active = NO;
+    hotkey_generation += 1;
+    [f18_window release];
+    f18_window = nil;
 }
 
 static NSEvent *hotkey_handle_event(NSEvent *event) {
@@ -209,77 +207,56 @@ static NSEvent *hotkey_handle_event(NSEvent *event) {
         return event;
     }
 
-    if (event.type == NSEventTypeFlagsChanged) {
-        if (event.keyCode != kKeyCodeFunction) {
+    if (event.type == NSEventTypeKeyDown && event.keyCode == kKeyCodeF18) {
+        if (event.ARepeat || f18_down) {
+            return nil; // swallow auto-repeat while held
+        }
+        NSWindow *window = event.window;
+        if (window == nil || browser_underlay_for_window(window) == nil) {
             return event;
         }
-        BOOL down = (event.modifierFlags & NSEventModifierFlagFunction) != 0;
-        if (down) {
-            NSWindow *window = event.window;
-            if (!hold_pending && !hold_active && window != nil &&
-                browser_underlay_for_window(window) != nil) {
-                hold_pending = YES;
-                hotkey_set_hold_window(window);
-                uint64_t generation = ++hold_generation;
-                dispatch_after(
-                    dispatch_time(DISPATCH_TIME_NOW, kHoldGraceMs * NSEC_PER_MSEC),
-                    dispatch_get_main_queue(), ^{
-                      if (hold_pending && generation == hold_generation && hold_window != nil) {
-                          hold_pending = NO;
-                          hold_active = YES;
-                          hotkey_callback(hotkey_ctx, hold_window, BrowserUnderlayHotkeyHoldStart);
-                      }
-                    });
-            }
-        } else {
-            if (hold_active) {
-                NSWindow *window = [[hold_window retain] autorelease];
-                hold_active = NO;
-                hotkey_clear_hold();
-                hotkey_callback(hotkey_ctx, window, BrowserUnderlayHotkeyHoldEnd);
-            } else if (hold_pending) {
-                hotkey_clear_hold();
-            }
-        }
-        // Modifier transitions always continue to normal dispatch.
-        return event;
-    }
-
-    if (event.type != NSEventTypeKeyDown) {
-        return event;
-    }
-
-    // Any key pressed during the grace period means the user is typing an
-    // Fn-combo, not holding to interact.
-    if (hold_pending) {
-        hotkey_clear_hold();
-    }
-
-    NSWindow *window = event.window;
-    if (window == nil) {
-        return event;
-    }
-    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window);
-    if (underlay == nil) {
-        return event;
-    }
-
-    NSEventModifierFlags mods =
-        event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
-    if (event.keyCode == kKeyCodeB &&
-        mods == (NSEventModifierFlagCommand | NSEventModifierFlagShift)) {
-        hotkey_callback(hotkey_ctx, window, BrowserUnderlayHotkeyToggle);
+        f18_down = YES;
+        f18_window = [window retain];
+        uint64_t generation = ++hotkey_generation;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kTapMaxMs * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{
+                         if (f18_down && generation == hotkey_generation && f18_window != nil) {
+                             f18_hold_active = YES;
+                             hotkey_callback(hotkey_ctx, f18_window,
+                                             BrowserUnderlayHotkeyHoldStart);
+                         }
+                       });
         return nil;
     }
-    if (underlay.interactive && event.keyCode == kKeyCodeEscape &&
-        mods == NSEventModifierFlagCommand) {
-        if (hold_active) {
-            hold_active = NO;
-            hotkey_clear_hold();
+
+    if (event.type == NSEventTypeKeyUp && event.keyCode == kKeyCodeF18) {
+        if (!f18_down) {
+            return event;
         }
-        hotkey_callback(hotkey_ctx, window, BrowserUnderlayHotkeyForceOff);
+        NSWindow *window = [[f18_window retain] autorelease];
+        BOOL was_hold = f18_hold_active;
+        hotkey_clear_f18();
+        if (window != nil) {
+            hotkey_callback(hotkey_ctx, window,
+                            was_hold ? BrowserUnderlayHotkeyHoldEnd
+                                     : BrowserUnderlayHotkeyToggle);
+        }
         return nil;
     }
+
+    if (event.type == NSEventTypeKeyDown && event.keyCode == kKeyCodeEscape) {
+        NSWindow *window = event.window;
+        WarpBrowserUnderlayView *underlay =
+            window != nil ? browser_underlay_for_window(window) : nil;
+        NSEventModifierFlags mods =
+            event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+        if (underlay != nil && underlay.interactive && mods == NSEventModifierFlagCommand) {
+            hotkey_clear_f18();
+            hotkey_callback(hotkey_ctx, window, BrowserUnderlayHotkeyForceOff);
+            return nil;
+        }
+    }
+
     return event;
 }
 
@@ -288,7 +265,7 @@ void browser_underlay_set_hotkey_callback(void *ctx, BrowserUnderlayHotkeyCallba
     hotkey_callback = callback;
     if (hotkey_monitor == nil && callback != NULL) {
         hotkey_monitor = [[NSEvent
-            addLocalMonitorForEventsMatchingMask:(NSEventMaskKeyDown | NSEventMaskFlagsChanged)
+            addLocalMonitorForEventsMatchingMask:(NSEventMaskKeyDown | NSEventMaskKeyUp)
                                          handler:^NSEvent *(NSEvent *event) {
                                            return hotkey_handle_event(event);
                                          }] retain];
@@ -300,10 +277,9 @@ void browser_underlay_detach(NSWindow *window) {
     if (underlay == nil) {
         return;
     }
-    // Drop any in-flight hold gesture that belongs to this window.
-    if (hold_window == window) {
-        hold_active = NO;
-        hotkey_clear_hold();
+    // Drop any in-flight hotkey gesture that belongs to this window.
+    if (f18_window == window) {
+        hotkey_clear_f18();
     }
     if (underlay.interactive) {
         browser_underlay_set_interactive(window, NO);
