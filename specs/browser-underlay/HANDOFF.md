@@ -73,10 +73,31 @@ settled — do not re-litigate.
   happens: `cargo clean -p <edited crates>` — beware this also drops the
   multi-GB incremental caches.
 - Pipe trap: `cargo check | tail` hides cargo's exit code — check `pipestatus`.
-- Still outstanding for runtime verification (needs a real Metal build):
-  integration suite, the muted-YouTube occlusion spike (WebKit pausing →
-  fallback plan B child-NSWindow, TECH.md risk 2), and manual settings-page
-  checks per `gui-settings-ui` "How to verify".
+- **Xcode 26.6 + MetalToolchain are now installed** (license accepted,
+  `xcodebuild -runFirstLaunch` + `-downloadComponent MetalToolchain` done),
+  so real Metal builds and the integration suite run on this machine.
+- **Runtime verification so far (real Metal build, 2026-08-05):**
+  - Live smoke test on `warp-oss --features browser_underlay`: ambience URL
+    setting attaches on startup and on change; WebGL aquarium animates
+    continuously behind night glass (occlusion risk 2 answered for
+    rAF/compositing); glass opacity slider works; interactive hotkeys work.
+    YouTube *embeds* refuse to play (error 153 — no referring page); use
+    direct pages/WebGL, or later load embeds via a wrapper page with a real
+    origin.
+  - Targeted integration batch over the contentView blast radius (18 tests:
+    window lifecycle/cascade, tab↔window drags, focus, input routing):
+    **18/18 pass** after fixing a real regression it caught — window dealloc
+    still read the state ivar off the contentView (now a plain container);
+    fixed to use `warp_host_view_for_window` (commit `31e75a30`).
+  - Dev-channel binaries (`warp`, `stable` bins) abort at startup without the
+    private `warp-channel-config` on PATH — use the `warp-oss` bin (inline
+    config) for source-built runs on this machine.
+- Still outstanding: `<video>`-element half of the occlusion spike (needs
+  `allow_browser_control` enabled in the OSS build's Settings › Scripting —
+  waiting on Abe; then `browser navigate` to a muted autoplay video and
+  `browser eval` that `currentTime` advances), the full 249-test ui suite
+  (only the 18 blast-radius tests were run), and the manual settings-page
+  search pass per `gui-settings-ui` "How to verify".
 
 ## Local machine state (for the session running on Abe's Mac)
 
