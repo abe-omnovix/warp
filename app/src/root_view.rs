@@ -940,7 +940,7 @@ pub(crate) fn open_new_with_workspace_source(
         view.focus(ctx);
         view
     });
-    crate::browser_underlay::maybe_attach_test_underlay(window_id, ctx);
+    crate::browser_underlay::maybe_attach_default_underlay(window_id, ctx);
     (window_id, root_view)
 }
 

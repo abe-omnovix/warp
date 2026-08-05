@@ -44,6 +44,7 @@ use super::{
     ToggleSettingActionPair, flags,
 };
 use crate::appearance::{Appearance, AppearanceEvent};
+use crate::browser_underlay::BrowserUnderlayState;
 use crate::channel::{Channel, ChannelState};
 use crate::context_chips::ChipAvailability;
 use crate::context_chips::prompt::{Prompt, PromptEvent};
@@ -59,12 +60,13 @@ use crate::prompt::editor_modal::OpenSource as PromptEditorOpenSource;
 use crate::server::telemetry::{InputUXChangeOrigin, TelemetryEvent};
 use crate::settings::app_icon::{AppIcon, AppIconSettings, ShowDockIconState};
 use crate::settings::{
-    AIFontName, AISettings, AppEditorSettings, CodeSettings, CursorBlink, CursorBlinkEnabled,
-    CursorDisplayType, DEFAULT_MONOSPACE_FONT_NAME, EnforceMinimumContrast, FocusPaneOnHover,
-    FontSettings, FontSettingsChangedEvent, GPUSettings, InputBoxType, InputModeSettings,
-    InputModeState, InputSettings, InputSettingsChangedEvent, MonospaceFontName, PaneSettings,
-    ShouldDimInactivePanes, ThemeSettings, UseSystemTheme, UseThinStrokes, active_theme_kind,
-    respect_system_theme,
+    AIFontName, AISettings, AppEditorSettings, BrowserAmbienceUrl, BrowserGlassOpacity,
+    BrowserUnderlaySettings, BrowserUnderlaySettingsChangedEvent, CodeSettings, CursorBlink,
+    CursorBlinkEnabled, CursorDisplayType, DEFAULT_MONOSPACE_FONT_NAME, EnforceMinimumContrast,
+    FocusPaneOnHover, FontSettings, FontSettingsChangedEvent, GPUSettings, InputBoxType,
+    InputModeSettings, InputModeState, InputSettings, InputSettingsChangedEvent, MonospaceFontName,
+    PaneSettings, ShouldDimInactivePanes, ThemeSettings, UseSystemTheme, UseThinStrokes,
+    active_theme_kind, respect_system_theme,
 };
 use crate::terminal::block_list_viewport::InputMode;
 use crate::terminal::blockgrid_element::BlockGridElement;
@@ -107,6 +109,7 @@ const FONT_FAMILY_DROPDOWN_WIDTH: f32 = 225.;
 const FONT_WEIGHT_DROPDOWN_WIDTH: f32 = 100.;
 const LINE_HEIGHT_INPUT_BOX_WIDTH: f32 = 80.;
 const OPACITY_SLIDER_WIDTH: f32 = 150.;
+const BROWSER_AMBIENCE_URL_INPUT_WIDTH: f32 = 260.;
 const MIN_FONT_SIZE: usize = 1;
 const MAX_FONT_SIZE: usize = 120;
 const MIN_LINE_SPACING: f32 = 0.1;
@@ -553,6 +556,8 @@ pub enum AppearancePageAction {
     RemoveDefaultDirectoryTabColor {
         path: PathBuf,
     },
+    SetBrowserAmbienceUrl,
+    SetBrowserGlassOpacity(f32),
 }
 
 pub struct AppearanceSettingsPageView {
@@ -567,6 +572,7 @@ pub struct AppearanceSettingsPageView {
     valid_new_window_columns: bool,
     new_window_rows_editor: ViewHandle<EditorView>,
     valid_new_window_rows: bool,
+    browser_ambience_url_editor: ViewHandle<EditorView>,
     opacity_state: SliderStateHandle,
     blur_state: SliderStateHandle,
     font_family_dropdown: ViewHandle<FilterableDropdown<AppearancePageAction>>,
@@ -809,6 +815,8 @@ impl TypedActionView for AppearanceSettingsPageView {
                 });
                 ctx.notify();
             }
+            SetBrowserAmbienceUrl => self.update_browser_ambience_url(true, ctx),
+            SetBrowserGlassOpacity(value) => self.set_browser_glass_opacity(*value, ctx),
         }
     }
 }
@@ -1109,6 +1117,51 @@ impl AppearanceSettingsPageView {
             ctx,
         );
 
+        // Only meaningful when the browser-underlay feature is enabled (its
+        // settings group is only registered then); otherwise starts empty and
+        // its widget is never built.
+        let browser_ambience_url = if BrowserUnderlayState::feature_enabled() {
+            BrowserUnderlaySettings::as_ref(ctx)
+                .ambience_url
+                .value()
+                .clone()
+        } else {
+            String::new()
+        };
+        let browser_ambience_url_editor = Self::editor(
+            |me, event, ctx| {
+                me.update_browser_ambience_url(
+                    matches!(event, EditorEvent::Blurred | EditorEvent::Enter),
+                    ctx,
+                );
+                if let EditorEvent::Escape = event {
+                    ctx.emit(SettingsPageEvent::FocusModal);
+                }
+            },
+            &browser_ambience_url,
+            ui_font_size,
+            ctx,
+        );
+        if BrowserUnderlayState::feature_enabled() {
+            // Keep the editor in sync when the setting changes elsewhere
+            // (settings file hot-reload, control plane).
+            ctx.subscribe_to_model(
+                &BrowserUnderlaySettings::handle(ctx),
+                |me, _, event, ctx| {
+                    if let BrowserUnderlaySettingsChangedEvent::BrowserAmbienceUrl { .. } = event {
+                        let url = BrowserUnderlaySettings::as_ref(ctx)
+                            .ambience_url
+                            .value()
+                            .clone();
+                        me.browser_ambience_url_editor.update(ctx, |editor, ctx| {
+                            editor.set_buffer_text(&url, ctx);
+                        });
+                    }
+                    ctx.notify();
+                },
+            );
+        }
+
         // Don't load all available system fonts in integration tests; we don't
         // have any integration tests which interact with the font dropdown, and
         // loading them in the background slows down test execution.
@@ -1344,6 +1397,7 @@ impl AppearanceSettingsPageView {
             valid_new_window_columns: true,
             new_window_rows_editor,
             valid_new_window_rows: true,
+            browser_ambience_url_editor,
             opacity_state: Default::default(),
             blur_state: Default::default(),
             font_family_dropdown,
@@ -1432,6 +1486,18 @@ impl AppearanceSettingsPageView {
 
         if !window_settings_widgets.is_empty() {
             categories.push(Category::new("Window", window_settings_widgets));
+        }
+
+        // Feature-flag gate: fixed for the process, so the widgets are simply
+        // never built when the browser underlay is unavailable.
+        if BrowserUnderlayState::feature_enabled() {
+            categories.push(Category::new(
+                "Browser ambience",
+                vec![
+                    Box::new(BrowserAmbienceUrlWidget),
+                    Box::new(BrowserGlassOpacityWidget::default()),
+                ],
+            ));
         }
 
         // Tools panel tab visibility toggles. These control which of the four
@@ -1936,6 +2002,40 @@ impl AppearanceSettingsPageView {
                     .background_opacity
                     .set_value(opacity_value as u8, ctx)
             );
+        });
+        ctx.notify();
+    }
+
+    /// Commits the ambience-URL editor's text to the setting. An empty value
+    /// clears the setting (detaching the underlay everywhere); a value with
+    /// no scheme is prefixed with `https://`.
+    fn update_browser_ambience_url(&mut self, blurred: bool, ctx: &mut ViewContext<Self>) {
+        if !blurred {
+            return;
+        }
+        let user_input = self
+            .browser_ambience_url_editor
+            .as_ref(ctx)
+            .buffer_text(ctx);
+        let trimmed = user_input.trim();
+        let normalized = if trimmed.is_empty() || trimmed.contains("://") {
+            trimmed.to_owned()
+        } else {
+            format!("https://{trimmed}")
+        };
+        self.browser_ambience_url_editor.update(ctx, |editor, ctx| {
+            editor.set_buffer_text(&normalized, ctx);
+        });
+        BrowserUnderlaySettings::handle(ctx).update(ctx, |settings, ctx| {
+            report_if_error!(settings.ambience_url.set_value(normalized, ctx));
+        });
+        ctx.focus_self();
+        ctx.notify();
+    }
+
+    fn set_browser_glass_opacity(&mut self, opacity_value: f32, ctx: &mut ViewContext<Self>) {
+        BrowserUnderlaySettings::handle(ctx).update(ctx, |settings, ctx| {
+            report_if_error!(settings.glass_opacity.set_value(opacity_value as u8, ctx));
         });
         ctx.notify();
     }
@@ -3395,6 +3495,122 @@ impl SettingsWidget for WindowOpacityWidget {
             }
         }
         col.finish()
+    }
+}
+
+/// URL loaded in the browser underlay behind every window ("ambience" mode).
+/// Only built when the browser-underlay feature is enabled.
+#[derive(Default)]
+struct BrowserAmbienceUrlWidget;
+
+impl SettingsWidget for BrowserAmbienceUrlWidget {
+    type View = AppearanceSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "browser ambience url underlay live background video stream"
+    }
+
+    fn render(
+        &self,
+        view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        Flex::column()
+            .with_child(render_body_item::<AppearancePageAction>(
+                "Ambience URL".into(),
+                None,
+                LocalOnlyIconState::for_setting(
+                    BrowserAmbienceUrl::storage_key(),
+                    BrowserAmbienceUrl::sync_to_cloud(),
+                    &mut view.local_only_icon_tooltip_states.borrow_mut(),
+                    app,
+                ),
+                ToggleState::Enabled,
+                appearance,
+                Dismiss::new(
+                    appearance
+                        .ui_builder()
+                        .text_input(view.browser_ambience_url_editor.clone())
+                        .with_style(UiComponentStyles {
+                            width: Some(BROWSER_AMBIENCE_URL_INPUT_WIDTH),
+                            padding: Some(Coords {
+                                top: 4.,
+                                bottom: 4.,
+                                left: 6.,
+                                right: 6.,
+                            }),
+                            background: Some(appearance.theme().surface_2().into()),
+                            ..Default::default()
+                        })
+                        .build()
+                        .finish(),
+                )
+                .on_dismiss(|ctx, _app| {
+                    ctx.dispatch_typed_action(AppearancePageAction::SetBrowserAmbienceUrl)
+                })
+                .finish(),
+                None,
+            ))
+            .finish()
+    }
+}
+
+/// Opacity of the translucent terminal fill drawn over the browser underlay.
+/// Only built when the browser-underlay feature is enabled.
+#[derive(Default)]
+struct BrowserGlassOpacityWidget {
+    slider_state: SliderStateHandle,
+}
+
+impl SettingsWidget for BrowserGlassOpacityWidget {
+    type View = AppearanceSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "browser glass opacity night translucent underlay"
+    }
+
+    fn render(
+        &self,
+        view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let opacity_value = *BrowserUnderlaySettings::as_ref(app).glass_opacity;
+        Flex::column()
+            .with_child(render_body_item::<AppearancePageAction>(
+                format!("Glass opacity: {opacity_value}"),
+                None,
+                LocalOnlyIconState::for_setting(
+                    BrowserGlassOpacity::storage_key(),
+                    BrowserGlassOpacity::sync_to_cloud(),
+                    &mut view.local_only_icon_tooltip_states.borrow_mut(),
+                    app,
+                ),
+                ToggleState::Enabled,
+                appearance,
+                appearance
+                    .ui_builder()
+                    .slider(self.slider_state.clone())
+                    .with_range(BrowserGlassOpacity::MIN as f32..BrowserGlassOpacity::MAX as f32)
+                    .with_default_value(opacity_value as f32)
+                    .with_style(UiComponentStyles {
+                        width: Some(OPACITY_SLIDER_WIDTH),
+                        // Margin is 3. to add up with 7. padding on slider for a total of 10.
+                        margin: Some(Coords::default().top(3.).bottom(3.)),
+                        ..Default::default()
+                    })
+                    .on_drag(|ctx, _, val| {
+                        ctx.dispatch_typed_action(AppearancePageAction::SetBrowserGlassOpacity(val))
+                    })
+                    .on_change(|ctx, _, val| {
+                        ctx.dispatch_typed_action(AppearancePageAction::SetBrowserGlassOpacity(val))
+                    })
+                    .build()
+                    .finish(),
+                None,
+            ))
+            .finish()
     }
 }
 

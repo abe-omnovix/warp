@@ -107,6 +107,9 @@ pub fn register_all_settings(ctx: &mut AppContext) {
     if FeatureFlag::WarpControlCli.is_enabled() {
         LocalControlSettings::register(ctx);
     }
+    if crate::browser_underlay::BrowserUnderlayState::feature_enabled() {
+        super::BrowserUnderlaySettings::register(ctx);
+    }
 
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     super::LinuxAppConfiguration::register(ctx);

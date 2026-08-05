@@ -127,6 +127,15 @@ impl<P: BackingView> PaneView<P> {
             }
         });
 
+        // Repaint when the browser underlay's glass configuration changes.
+        // The singleton is absent in harnesses that skip full app init.
+        if ctx.has_singleton_model::<crate::browser_underlay::BrowserUnderlayState>() {
+            ctx.subscribe_to_model(
+                &crate::browser_underlay::BrowserUnderlayState::handle(ctx),
+                |_, _, _, ctx| ctx.notify(),
+            );
+        }
+
         Self {
             pane_id,
             pane_stack,
@@ -411,6 +420,20 @@ impl<P: BackingView> View for PaneView<P> {
         column.add_child(Shrinkable::new(1., ChildView::new(&active_child).finish()).finish());
 
         let mut container = Container::new(column.finish());
+
+        // Panes normally paint no background (the workspace fill behind them
+        // does). With a browser underlay attached and glass panes present,
+        // each pane paints its own: glass panes a translucent fill so the
+        // page shows through, all others near-opaque for legibility. The
+        // header's live window is used because panes can move across windows.
+        let window_id = self.header.window_id(app);
+        if let Some(opacity) =
+            crate::browser_underlay::pane_fill_opacity(window_id, self.pane_id, app)
+        {
+            container =
+                container.with_background(appearance.theme().background().with_opacity(opacity));
+        }
+
         if pane_configuration.show_accent_border {
             let border = Border::all(2.).with_border_fill(appearance.theme().accent());
             container = container.with_border(border);

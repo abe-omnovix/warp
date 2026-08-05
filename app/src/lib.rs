@@ -11,6 +11,7 @@ mod auth;
 mod autoupdate;
 mod banner;
 mod billing;
+pub mod browser_underlay;
 mod changelog_model;
 mod chip_configurator;
 mod cloud_object;
@@ -22,7 +23,6 @@ mod command_palette;
 mod completer;
 #[allow(dead_code)]
 mod context_chips;
-pub mod browser_underlay;
 #[cfg(enable_crash_recovery)]
 mod crash_recovery;
 #[cfg(feature = "crash_reporting")]
@@ -1528,6 +1528,7 @@ pub(crate) fn initialize_app(
 
     ctx.add_singleton_model(|_ctx| GPUState::new());
     ctx.add_singleton_model(|_ctx| crate::browser_underlay::BrowserUnderlayState::new());
+    crate::browser_underlay::init(ctx);
 
     PrivacySettings::register_singleton(ctx);
 

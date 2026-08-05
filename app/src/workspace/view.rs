@@ -3207,6 +3207,15 @@ impl Workspace {
             }
         });
 
+        // Repaint the workspace glass when the browser underlay is attached,
+        // detached, or reconfigured. The singleton is absent in harnesses
+        // that skip full app init.
+        if ctx.has_singleton_model::<BrowserUnderlayState>() {
+            ctx.subscribe_to_model(&BrowserUnderlayState::handle(ctx), |_, _, _, ctx| {
+                ctx.notify()
+            });
+        }
+
         let toast_stack =
             ctx.add_typed_action_view(|_| DismissibleToastStack::new(Duration::from_secs(4)));
 
@@ -27601,8 +27610,11 @@ impl View for Workspace {
             // With a browser underlay attached, the native webview behind the
             // Metal surface plays the role of the background image: leave the
             // workspace background unpainted so the underlay shows through the
-            // terminals' translucent glass fill.
-            _ if BrowserUnderlayState::as_ref(app).is_attached(self.window_id) => {
+            // terminals' translucent glass fill. The singleton is absent in
+            // harnesses that skip full app init.
+            _ if app.has_singleton_model::<BrowserUnderlayState>()
+                && BrowserUnderlayState::as_ref(app).is_attached(self.window_id) =>
+            {
                 stack.add_child(workspace.finish());
             }
             _ => {
