@@ -61,14 +61,89 @@ BOOL browser_underlay_attach(NSWindow *window, const char *url) {
         // still requires the page to be unmuted explicitly (interactive click
         // or JS), matching platform autoplay policies.
         configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
-        // Allow the HTML5 element-fullscreen API (off by default in
-        // WKWebView). Element fullscreen expands to the web view's bounds —
-        // and the underlay fills the window — so a player's fullscreen
-        // button bleeds the video across the whole app background instead of
-        // taking over the display.
+        // Advertise the HTML5 element-fullscreen API (off by default in
+        // WKWebView) so players show their fullscreen button at all…
         if (@available(macOS 12.3, *)) {
             configuration.preferences.elementFullscreenEnabled = YES;
         }
+        // …but replace its implementation inside the page: WebKit presents
+        // element fullscreen in a separate fullscreen Space, detaching the
+        // video from the window. The shim below pins the requesting element
+        // to the viewport instead — the underlay fills the window, so
+        // "fullscreen" bleeds across the whole app background behind the
+        // terminal glass — and mimics the fullscreen API surface
+        // (fullscreenElement, fullscreenchange, the webkit-prefixed
+        // variants) so players such as YouTube run their own fullscreen
+        // layout and keep their controls working.
+        NSString *fakeFullscreenShim = @""
+            "(function () {\n"
+            "  if (window.__warpFakeFullscreen) { return; }\n"
+            "  window.__warpFakeFullscreen = true;\n"
+            "  var fsElement = null;\n"
+            "  var FILL = '__warp_fill_fullscreen';\n"
+            "  function ensureStyle() {\n"
+            "    if (document.getElementById('__warp_fill_style')) { return; }\n"
+            "    var style = document.createElement('style');\n"
+            "    style.id = '__warp_fill_style';\n"
+            "    style.textContent = '.' + FILL + '{position:fixed !important;"
+            "top:0 !important;left:0 !important;right:0 !important;bottom:0 !important;"
+            "width:100vw !important;height:100vh !important;max-width:none !important;"
+            "max-height:none !important;z-index:2147483647 !important;"
+            "background:#000 !important;margin:0 !important;transform:none !important;}';\n"
+            "    (document.head || document.documentElement).appendChild(style);\n"
+            "  }\n"
+            "  function fireChange() {\n"
+            "    try { document.dispatchEvent(new Event('fullscreenchange')); } catch (e) {}\n"
+            "    try { document.dispatchEvent(new Event('webkitfullscreenchange')); } catch (e) {}\n"
+            "    try { window.dispatchEvent(new Event('resize')); } catch (e) {}\n"
+            "  }\n"
+            "  function enter(el) {\n"
+            "    ensureStyle();\n"
+            "    if (fsElement && fsElement !== el) { fsElement.classList.remove(FILL); }\n"
+            "    fsElement = el;\n"
+            "    el.classList.add(FILL);\n"
+            "    fireChange();\n"
+            "    return Promise.resolve();\n"
+            "  }\n"
+            "  function exit() {\n"
+            "    if (fsElement) {\n"
+            "      fsElement.classList.remove(FILL);\n"
+            "      fsElement = null;\n"
+            "      fireChange();\n"
+            "    }\n"
+            "    return Promise.resolve();\n"
+            "  }\n"
+            "  function defineGetter(proto, name, getter) {\n"
+            "    try {\n"
+            "      Object.defineProperty(proto, name, { configurable: true, get: getter });\n"
+            "    } catch (e) {}\n"
+            "  }\n"
+            "  Element.prototype.requestFullscreen = function () { return enter(this); };\n"
+            "  Element.prototype.webkitRequestFullscreen = function () { return enter(this); };\n"
+            "  Element.prototype.webkitRequestFullScreen = function () { return enter(this); };\n"
+            "  Document.prototype.exitFullscreen = function () { return exit(); };\n"
+            "  Document.prototype.webkitExitFullscreen = function () { return exit(); };\n"
+            "  Document.prototype.webkitCancelFullScreen = function () { return exit(); };\n"
+            "  var current = function () { return fsElement; };\n"
+            "  defineGetter(Document.prototype, 'fullscreenElement', current);\n"
+            "  defineGetter(Document.prototype, 'webkitFullscreenElement', current);\n"
+            "  defineGetter(Document.prototype, 'webkitCurrentFullScreenElement', current);\n"
+            "  defineGetter(Document.prototype, 'webkitIsFullScreen', function () {\n"
+            "    return fsElement != null;\n"
+            "  });\n"
+            "  defineGetter(Document.prototype, 'fullscreenEnabled', function () { return true; });\n"
+            "  defineGetter(Document.prototype, 'webkitFullscreenEnabled', function () {\n"
+            "    return true;\n"
+            "  });\n"
+            "  document.addEventListener('keydown', function (event) {\n"
+            "    if (event.key === 'Escape' && fsElement != null) { exit(); }\n"
+            "  }, true);\n"
+            "})();";
+        WKUserScript *fakeFullscreen =
+            [[[WKUserScript alloc] initWithSource:fakeFullscreenShim
+                                    injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                 forMainFrameOnly:NO] autorelease];
+        [configuration.userContentController addUserScript:fakeFullscreen];
 
         underlay = [[[WarpBrowserUnderlayView alloc] initWithFrame:container.bounds
                                                      configuration:configuration] autorelease];
