@@ -1923,18 +1923,20 @@ unsafe fn remove_state_ivar_from_object(object: &mut Object) -> Rc<WindowState> 
 pub extern "C-unwind" fn warp_dealloc_window(native_window: &mut Object) {
     log::info!("dealloc native window {native_window:p}");
     let state;
-    // SAFETY: `native_window` is a WarpWindow being deallocated; its content view
+    // SAFETY: `native_window` is a WarpWindow being deallocated; its host view
     // and delegate both carry the window-state ivar.
     unsafe {
         let window = &*(native_window as *const Object).cast::<NSWindow>();
 
-        // Remove the window state from the content NSView and drop a reference.
-        let native_view = window
-            .contentView()
-            .expect("WarpWindow always has a content view");
-        let _ = remove_state_ivar_from_object(
-            &mut *Retained::as_ptr(&native_view).cast::<Object>().cast_mut(),
+        // Remove the window state from the host NSView and drop a reference.
+        // The content view itself is a plain container (see window.m) that
+        // carries no state ivar; the ivar lives on the host view inside it.
+        let host_view = warp_host_view_for_window(window);
+        assert!(
+            !host_view.is_null(),
+            "WarpWindow always has a host view during dealloc"
         );
+        let _ = remove_state_ivar_from_object(&mut *host_view.cast::<Object>());
 
         // Remove the window state from the NSWindowDelegate and drop a reference.
         let native_window_delegate = window.delegate().expect("WarpWindow always has a delegate");
