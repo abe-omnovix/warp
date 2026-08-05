@@ -23,6 +23,10 @@
 - Every MCP tool call is **pane-keyed** (explicit `pane` argument or
   `X-Warp-Pane` header). There is no active-pane fallback, so an agent
   cannot affect whatever tab the operator happens to be looking at.
+  `warpctrl browser`/`pane glass` commands follow the same rule: they bind
+  to the pane they run in (`$WARP_TERMINAL_SESSION_UUID`) and error without
+  an explicit binding otherwise — the active pane tracks the operator's
+  focus, so binding to it would race against their attention.
 - The **ambience underlay is unreachable from the MCP endpoint**: the
   `ambience: true` routing flag exists only on the warpctrl/control-plane
   surface, and the endpoint never sets it. An agent cannot navigate,

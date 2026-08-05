@@ -393,19 +393,37 @@ pub enum BrowserCommand {
 
 /// Routing flags shared by all `browser` subcommands: the window's ambience
 /// underlay, or an agent underlay keyed by its pane's session UUID.
+///
+/// There is deliberately no "active pane" fallback: binding follows the pane
+/// this command runs in (via `$WARP_TERMINAL_SESSION_UUID`), so a caller
+/// outside any Warp pane must name a pane explicitly. The active pane is
+/// whatever the human is focused on right now — binding to it races against
+/// their attention.
 #[derive(Debug, Clone, Args)]
 pub struct BrowserRouteArgs {
     /// Target the window's user-owned ambience underlay.
-    #[arg(long = "ambience", conflicts_with = "pane_session_uuid")]
+    #[arg(long = "ambience")]
     pub ambience: bool,
 
     /// Terminal session UUID (hex) of the agent underlay's owning pane.
-    /// Defaults to the pane resolved from the target selector.
-    #[arg(long = "pane-session-uuid")]
+    /// Defaults to the pane this command runs in.
+    #[arg(long = "pane-session-uuid", env = "WARP_TERMINAL_SESSION_UUID")]
     pub pane_session_uuid: Option<String>,
 
     #[command(flatten)]
     pub target: TargetArgs,
+}
+
+impl BrowserRouteArgs {
+    /// The agent pane binding, unless the ambience route was chosen —
+    /// `--ambience` must win over the environment-derived pane default.
+    pub fn agent_pane(&self) -> Option<String> {
+        if self.ambience {
+            None
+        } else {
+            self.pane_session_uuid.clone()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Args)]
@@ -473,8 +491,9 @@ pub struct PaneGlassArgs {
     #[arg(long = "opacity")]
     pub opacity: Option<u8>,
 
-    /// Terminal session UUID (hex) of the owning pane.
-    #[arg(long = "pane-session-uuid")]
+    /// Terminal session UUID (hex) of the owning pane. Defaults to the pane
+    /// this command runs in.
+    #[arg(long = "pane-session-uuid", env = "WARP_TERMINAL_SESSION_UUID")]
     pub pane_session_uuid: Option<String>,
 
     #[command(flatten)]

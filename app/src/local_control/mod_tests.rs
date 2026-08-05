@@ -743,3 +743,58 @@ fn mcp_tool_calls_pass_the_browser_control_permission_gate() {
         );
     });
 }
+
+#[test]
+fn browser_actions_have_no_active_pane_fallback() {
+    let _cli_flag = FeatureFlag::WarpControlCli.override_enabled(true);
+    let _underlay_flag = FeatureFlag::BrowserUnderlay.override_enabled(true);
+    warpui::App::test((), |mut app| async move {
+        crate::test_util::settings::initialize_settings_for_tests(&mut app);
+        app.update(|ctx| {
+            LocalControlSettings::handle(ctx).update(ctx, |settings, ctx| {
+                settings
+                    .local_control_mode
+                    .set_value(LocalControlMode::Enabled, ctx)?;
+                settings.allow_browser_control.set_value(true, ctx)
+            })
+        })
+        .expect("permissions should enable");
+
+        let instance_id = InstanceId("inst_test".to_owned());
+        let bridge = app.add_singleton_model(LocalControlBridge::new);
+        let response = bridge.update(&mut app, |bridge, ctx| {
+            bridge.set_instance_id(instance_id.clone());
+            // Fully authorized request with no pane binding and no explicit
+            // pane selector: the handler must refuse rather than guess at
+            // "the active pane" (whatever the human is focused on).
+            let request = RequestEnvelope::new(
+                Action::with_params(
+                    ActionKind::BrowserStatus,
+                    ::local_control::protocol::BrowserTargetParams {
+                        ambience: false,
+                        pane_session_uuid: None,
+                    },
+                )
+                .expect("params serialize"),
+            );
+            let grant = CredentialGrant::new(
+                instance_id.clone(),
+                ActionKind::BrowserStatus,
+                Duration::minutes(1),
+            );
+            bridge.handle_request(request, grant, ctx)
+        });
+        let super::bridge::HandlerResponse::Ready(envelope) = response else {
+            panic!("browser.status without a binding must answer synchronously");
+        };
+        let ::local_control::ControlResponse::Error { error } = envelope.response else {
+            panic!("browser.status without a binding must fail");
+        };
+        assert_eq!(error.code, ErrorCode::MissingTarget);
+        assert!(
+            error.message.contains("pane-session-uuid"),
+            "{}",
+            error.message
+        );
+    });
+}

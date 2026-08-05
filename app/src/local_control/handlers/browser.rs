@@ -109,9 +109,9 @@ fn resolve_target(
     }
     let pane_key = match pane_session_uuid {
         Some(uuid) if !uuid.is_empty() => uuid.to_owned(),
-        _ => {
-            // Resolve the pane from the target selector (active pane by
-            // default) and map it to its persistent session UUID.
+        // An explicitly stated pane/session selector is caller intent;
+        // resolve it to its persistent session UUID.
+        _ if request.target.pane.is_some() || request.target.session.is_some() => {
             let pane_group = target_pane_group(action, &request.target, ctx)?;
             let pane_id = target_pane_id(action, &request.target, &pane_group, ctx)?;
             pane_group
@@ -127,6 +127,23 @@ fn resolve_target(
                         ),
                     )
                 })?
+        }
+        // No implicit "active pane" fallback: the active pane is whatever
+        // the human is focused on right now, so binding to it races against
+        // their attention (and once misbound, every later call compounds
+        // the mistake). Callers inside a Warp pane get their own pane by
+        // default via $WARP_TERMINAL_SESSION_UUID (warpctrl reads it);
+        // everyone else must name a pane.
+        _ => {
+            return Err(ControlError::new(
+                ErrorCode::MissingTarget,
+                format!(
+                    "{} requires an explicit pane binding: pass --pane-session-uuid (see \
+                     `warpctrl pane list`), target a pane selector, or run inside the Warp \
+                     pane whose browser you mean",
+                    action.as_str()
+                ),
+            ));
         }
     };
     Ok(BrowserTargetRef::Agent(pane_key))

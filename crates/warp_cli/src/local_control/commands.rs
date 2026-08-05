@@ -500,44 +500,44 @@ pub(super) fn run_browser_command(
 ) -> Result<(), ControlError> {
     match command {
         BrowserCommand::Attach(args) => run_action_with_params(
-            args.route.target,
+            args.route.target.clone(),
             ActionKind::BrowserAttach,
             BrowserAttachParams {
                 url: args.url,
                 glass: !args.no_glass,
                 glass_opacity: args.glass_opacity,
                 ambience: args.route.ambience,
-                pane_session_uuid: args.route.pane_session_uuid,
+                pane_session_uuid: args.route.agent_pane(),
             },
             output_format,
         ),
         BrowserCommand::Navigate(args) => run_action_with_params(
-            args.route.target,
+            args.route.target.clone(),
             ActionKind::BrowserNavigate,
             UrlParams {
                 url: args.url,
                 ambience: args.route.ambience,
-                pane_session_uuid: args.route.pane_session_uuid,
+                pane_session_uuid: args.route.agent_pane(),
             },
             output_format,
         ),
         BrowserCommand::Eval(args) => run_action_with_params(
-            args.route.target,
+            args.route.target.clone(),
             ActionKind::BrowserEval,
             JavascriptParams {
                 javascript: args.javascript,
                 ambience: args.route.ambience,
-                pane_session_uuid: args.route.pane_session_uuid,
+                pane_session_uuid: args.route.agent_pane(),
             },
             output_format,
         ),
         BrowserCommand::Screenshot(args) => {
             let data = send_action_request(
-                args.route.target,
+                args.route.target.clone(),
                 ActionKind::BrowserScreenshot,
                 BrowserTargetParams {
                     ambience: args.route.ambience,
-                    pane_session_uuid: args.route.pane_session_uuid,
+                    pane_session_uuid: args.route.agent_pane(),
                 },
             )?;
             if let Some(path) = args.output {
@@ -572,30 +572,30 @@ pub(super) fn run_browser_command(
             write_action_data(ActionKind::BrowserScreenshot, &data, output_format)
         }
         BrowserCommand::Interactive(args) => run_action_with_params(
-            args.route.target,
+            args.route.target.clone(),
             ActionKind::BrowserInteractive,
             BrowserInteractiveParams {
                 value: args.enabled,
                 ambience: args.route.ambience,
-                pane_session_uuid: args.route.pane_session_uuid,
+                pane_session_uuid: args.route.agent_pane(),
             },
             output_format,
         ),
         BrowserCommand::Status(args) => run_action_with_params(
-            args.target,
+            args.target.clone(),
             ActionKind::BrowserStatus,
             BrowserTargetParams {
                 ambience: args.ambience,
-                pane_session_uuid: args.pane_session_uuid,
+                pane_session_uuid: args.agent_pane(),
             },
             output_format,
         ),
         BrowserCommand::Detach(args) => run_action_with_params(
-            args.target,
+            args.target.clone(),
             ActionKind::BrowserDetach,
             BrowserTargetParams {
                 ambience: args.ambience,
-                pane_session_uuid: args.pane_session_uuid,
+                pane_session_uuid: args.agent_pane(),
             },
             output_format,
         ),

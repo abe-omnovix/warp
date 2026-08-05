@@ -40,7 +40,9 @@ warpctrl browser detach
 
 (`attach` without `--no-glass` also turns the targeted pane to night glass —
 that's the agent-browsing porthole; `warpctrl pane glass true|false` toggles
-it independently.)
+it independently. Browser commands bind to the pane they run in; from
+outside a Warp pane, pass `--pane-session-uuid` from `warpctrl pane list` —
+there is deliberately no "active pane" default.)
 
 ## Interacting with the page yourself
 
