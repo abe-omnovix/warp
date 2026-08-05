@@ -215,6 +215,9 @@ pub(crate) fn interactive(
     // The hold hotkey may be physically held right now, so the state model
     // decides the effective mode that reaches the webview.
     let effective = BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+        if let BrowserUnderlayOwner::Agent(pane_key) = &owner {
+            state.touch_agent(pane_key, None);
+        }
         state.set_interactive(window_id, &owner, params.value, ctx)
     });
     if let Some(effective) = effective {
@@ -318,7 +321,11 @@ pub(crate) fn pane_glass_set(
         unreachable!("pane.glass.set always resolves an agent target");
     };
     let applied = BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-        state.set_agent_glass(&pane_key, params.enabled, params.opacity, ctx)
+        let applied = state.set_agent_glass(&pane_key, params.enabled, params.opacity, ctx);
+        if applied {
+            state.touch_agent(&pane_key, None);
+        }
+        applied
     });
     if !applied {
         return Err(ControlError::new(
