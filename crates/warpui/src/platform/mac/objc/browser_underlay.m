@@ -61,6 +61,14 @@ BOOL browser_underlay_attach(NSWindow *window, const char *url) {
         // still requires the page to be unmuted explicitly (interactive click
         // or JS), matching platform autoplay policies.
         configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
+        // Allow the HTML5 element-fullscreen API (off by default in
+        // WKWebView). Element fullscreen expands to the web view's bounds —
+        // and the underlay fills the window — so a player's fullscreen
+        // button bleeds the video across the whole app background instead of
+        // taking over the display.
+        if (@available(macOS 12.3, *)) {
+            configuration.preferences.elementFullscreenEnabled = YES;
+        }
 
         underlay = [[[WarpBrowserUnderlayView alloc] initWithFrame:container.bounds
                                                      configuration:configuration] autorelease];
