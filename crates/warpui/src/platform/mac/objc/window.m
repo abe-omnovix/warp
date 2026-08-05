@@ -7,6 +7,7 @@
 #import "alert.h"
 #import "app.h"
 #import "fullscreen_queue.h"
+#import "browser_underlay.h"
 #import "host_view.h"
 #import "window_blur.h"
 
@@ -463,7 +464,17 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
         // but it's unclear how or why the events get redirected.
         // This breaks drag-and-drop for panes and tabs (see CLD-2581), so we work around it with
         // custom dispatching.
-        case NSEventTypeLeftMouseUp:
+        case NSEventTypeLeftMouseUp: {
+            // While the browser underlay is interactive it is resolved by
+            // normal hit-testing (the host view is hit-dead); forcing these
+            // events to the host view would strand the page's mouse-up, so
+            // DOM clicks (down+up on the same element) could never complete.
+            WarpBrowserUnderlayView *underlay = browser_underlay_for_window(self);
+            if (underlay != nil && underlay.interactive) {
+                _leftMouseDownStartedInNativeWindowChrome = NO;
+                [super sendEvent:event];
+                break;
+            }
             if (@available(macOS 27, *)) {
                 if (_leftMouseDownStartedInNativeWindowChrome) {
                     [super sendEvent:event];
@@ -475,7 +486,13 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
             }
             _leftMouseDownStartedInNativeWindowChrome = NO;
             break;
-        case NSEventTypeLeftMouseDragged:
+        }
+        case NSEventTypeLeftMouseDragged: {
+            WarpBrowserUnderlayView *underlay = browser_underlay_for_window(self);
+            if (underlay != nil && underlay.interactive) {
+                [super sendEvent:event];
+                break;
+            }
             if (@available(macOS 27, *)) {
                 if (_leftMouseDownStartedInNativeWindowChrome) {
                     [super sendEvent:event];
@@ -486,14 +503,21 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
                 [warp_host_view_for_window(self) mouseDragged:event];
             }
             break;
+        }
 
         // The NSWindow's default sendEvent: implementation does not propagate RightMouseDown events
         // from the application title bar to the content view when running a development build
         // locally, though it is unclear why. This breaks the right-click context menu for tabs on
         // local builds, so we propagate the RightMouseDown event manually.
-        case NSEventTypeRightMouseDown:
+        case NSEventTypeRightMouseDown: {
+            WarpBrowserUnderlayView *underlay = browser_underlay_for_window(self);
+            if (underlay != nil && underlay.interactive) {
+                [super sendEvent:event];
+                break;
+            }
             [warp_host_view_for_window(self) rightMouseDown:event];
             break;
+        }
         default:
             [super sendEvent:event];
             break;
@@ -514,6 +538,19 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
 }
 
 - (BOOL)performKeyEquivalent:(NSEvent *)event {
+    // While the browser underlay is interactive, chorded keys belong to the
+    // page (the webview is first responder): skip Warp's keybinding-priority
+    // path entirely so e.g. Cmd+A/Cmd+F reach the page instead of invisibly
+    // triggering terminal actions. Menu equivalents (Cmd+Q, Cmd+W) still work
+    // through the default path, and the F18/Cmd+Esc gestures are recognized
+    // by the app-local event monitor before this method runs.
+    {
+        WarpBrowserUnderlayView *underlay = browser_underlay_for_window(self);
+        if (underlay != nil && underlay.interactive) {
+            return [super performKeyEquivalent:event];
+        }
+    }
+
     // We need to bypass the default performKeyEquivalent implementation which, in the case of
     // having keybinding conflicts with MacOS itself, yields priority to the OS.
     if ([event type] == NSEventTypeKeyDown) {

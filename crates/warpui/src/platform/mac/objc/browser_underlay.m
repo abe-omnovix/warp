@@ -152,8 +152,23 @@ void browser_underlay_snapshot(NSWindow *window, void *ctx,
 
 void browser_underlay_set_interactive(NSWindow *window, BOOL interactive) {
     WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window);
+    if (underlay == nil) {
+        return;
+    }
+    // Order matters: `acceptsFirstResponder` consults this flag, so it must
+    // be set before makeFirstResponder: can succeed.
     underlay.interactive = interactive;
-    if (!interactive && underlay != nil) {
+    if (interactive) {
+        // Hand the keyboard to the page — unless focus is already inside it:
+        // re-asserting interactive (e.g. a hold ending while the latch is on)
+        // must not blur the page's focused element.
+        NSResponder *firstResponder = window.firstResponder;
+        BOOL alreadyFocused = [firstResponder isKindOfClass:[NSView class]] &&
+                              [(NSView *)firstResponder isDescendantOf:underlay];
+        if (!alreadyFocused) {
+            [window makeFirstResponder:underlay];
+        }
+    } else {
         // Return key focus to the host view so typing lands in the terminal.
         [window makeFirstResponder:warp_host_view_for_window(window)];
     }
@@ -248,8 +263,11 @@ static NSEvent *hotkey_handle_event(NSEvent *event) {
         NSWindow *window = event.window;
         WarpBrowserUnderlayView *underlay =
             window != nil ? browser_underlay_for_window(window) : nil;
+        // Ignore a latched caps-lock state (possible before the CapsLock
+        // remap, or from another keyboard) when matching the chord.
         NSEventModifierFlags mods =
-            event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+            (event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask) &
+            ~NSEventModifierFlagCapsLock;
         if (underlay != nil && underlay.interactive && mods == NSEventModifierFlagCommand) {
             hotkey_clear_f18();
             hotkey_callback(hotkey_ctx, window, BrowserUnderlayHotkeyForceOff);
@@ -269,6 +287,22 @@ void browser_underlay_set_hotkey_callback(void *ctx, BrowserUnderlayHotkeyCallba
                                          handler:^NSEvent *(NSEvent *event) {
                                            return hotkey_handle_event(event);
                                          }] retain];
+        // A key-up can be lost if the app deactivates while F18 is held; end
+        // any in-flight gesture so the state cannot wedge (a stuck f18_down
+        // would swallow every later F18 press).
+        [[NSNotificationCenter defaultCenter]
+            addObserverForName:NSApplicationDidResignActiveNotification
+                        object:nil
+                         queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *note) {
+                      if (f18_hold_active && f18_window != nil && hotkey_callback != NULL) {
+                          NSWindow *window = [[f18_window retain] autorelease];
+                          hotkey_clear_f18();
+                          hotkey_callback(hotkey_ctx, window, BrowserUnderlayHotkeyHoldEnd);
+                      } else if (f18_down) {
+                          hotkey_clear_f18();
+                      }
+                    }];
     }
 }
 

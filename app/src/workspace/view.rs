@@ -27592,28 +27592,15 @@ impl View for Workspace {
             .effective_opacity(self.window_id, app);
 
         match theme.background_image() {
-            Some(img) => {
-                let opacity_ratio = background_opacity as f32 / 100.;
-                stack.add_child(
-                    Shrinkable::new(
-                        1.,
-                        Image::new(img.source(), CacheOption::Original)
-                            .cover()
-                            .with_opacity(opacity_ratio)
-                            .with_corner_radius(window_corner_radius)
-                            .finish(),
-                    )
-                    .finish(),
-                );
-                stack.add_child(workspace.finish());
-            }
             // With a browser underlay attached, the native webview behind the
-            // Metal surface plays the role of the background image: leave the
-            // workspace background unpainted so the underlay shows through the
-            // terminals' translucent glass fill. While the underlay is
-            // interactive (input reaches the page instead of the terminal),
-            // an accent border makes the mode switch visible. The singleton
-            // is absent in harnesses that skip full app init.
+            // Metal surface plays the role of the background image (it takes
+            // priority over a theme's background image, which would otherwise
+            // paint over it): leave the workspace background unpainted so the
+            // underlay shows through the terminals' translucent glass fill.
+            // While the underlay is interactive (input reaches the page
+            // instead of the terminal), an accent border makes the mode
+            // switch visible. The singleton is absent in harnesses that skip
+            // full app init.
             _ if app.has_singleton_model::<BrowserUnderlayState>()
                 && BrowserUnderlayState::as_ref(app).is_attached(self.window_id) =>
             {
@@ -27629,6 +27616,21 @@ impl View for Workspace {
                 } else {
                     stack.add_child(workspace.finish());
                 }
+            }
+            Some(img) => {
+                let opacity_ratio = background_opacity as f32 / 100.;
+                stack.add_child(
+                    Shrinkable::new(
+                        1.,
+                        Image::new(img.source(), CacheOption::Original)
+                            .cover()
+                            .with_opacity(opacity_ratio)
+                            .with_corner_radius(window_corner_radius)
+                            .finish(),
+                    )
+                    .finish(),
+                );
+                stack.add_child(workspace.finish());
             }
             _ => {
                 stack.add_child(

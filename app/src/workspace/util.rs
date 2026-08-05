@@ -398,15 +398,11 @@ fn get_terminal_background_opacity(window_id: WindowId, app: &AppContext) -> u8 
         .effective_opacity(window_id, app);
 
     match theme.background_image() {
-        Some(img) => {
-            let opacity_ratio = background_opacity as f32 / 100.;
-            // Scale the overlay opacity with the background opacity ratio.
-            (((100 - img.opacity) as f32) * opacity_ratio) as u8
-        }
-        // With an underlay attached, either the whole window is glass
-        // (ambience mode) or a faint tint with per-pane fills on top (glass
-        // panes present) — see `browser_underlay::workspace_fill_opacity`.
-        // The singleton is absent in harnesses that skip full app init.
+        // With an underlay attached (it takes priority over a theme's
+        // background image), either the whole window is glass (ambience
+        // mode) or a faint tint with per-pane fills on top (glass panes
+        // present) — see `browser_underlay::workspace_fill_opacity`. The
+        // singleton is absent in harnesses that skip full app init.
         _ if app.has_singleton_model::<crate::browser_underlay::BrowserUnderlayState>()
             && crate::browser_underlay::BrowserUnderlayState::as_ref(app)
                 .is_attached(window_id) =>
@@ -414,6 +410,11 @@ fn get_terminal_background_opacity(window_id: WindowId, app: &AppContext) -> u8 
             let opacity_ratio = background_opacity as f32 / 100.;
             let glass_opacity = crate::browser_underlay::workspace_fill_opacity(window_id, app);
             (glass_opacity as f32 * opacity_ratio) as u8
+        }
+        Some(img) => {
+            let opacity_ratio = background_opacity as f32 / 100.;
+            // Scale the overlay opacity with the background opacity ratio.
+            (((100 - img.opacity) as f32) * opacity_ratio) as u8
         }
         _ => background_opacity,
     }

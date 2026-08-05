@@ -1,5 +1,7 @@
 #import "host_view.h"
 
+#import "browser_underlay.h"
+
 #import <Metal/Metal.h>
 
 void warp_view_did_change_backing_properties(WarpHostView *, BOOL);
@@ -67,6 +69,21 @@ void warp_marked_text_cleared(WarpHostView *);
 
 - (BOOL)acceptsFirstResponder {
     return YES;
+}
+
+// AppKit hit-tests siblings front-to-back and this view sits *in front of*
+// the browser underlay, so the underlay's own hitTest: is never consulted
+// while this view claims the point. While the underlay is interactive it owns
+// mouse input: return nil so the container's traversal falls through to it.
+- (NSView *)hitTest:(NSPoint)point {
+    NSWindow *window = self.window;
+    if (window != nil) {
+        WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window);
+        if (underlay != nil && underlay.interactive) {
+            return nil;
+        }
+    }
+    return [super hitTest:point];
 }
 
 - (BOOL)mouseDownCanMoveWindow {
