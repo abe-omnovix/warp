@@ -3,11 +3,11 @@ use base64::Engine as _;
 use local_control::discovery::InstanceRecord;
 use local_control::protocol::{
     Action, ActionKind, ActionNameParams, BindingNameParams, BooleanValueParams,
-    BrowserAttachParams, ColorValueParams, ControlError, DirectionParams, EmptyParams, ErrorCode,
-    FileOpenParams, JavascriptParams, KeyParams, KeyValueParams, PageQueryParams, PaneGlassParams,
-    QueryParams, RenameParams, RequestEnvelope, ResizeParams, SettingListParams, TabActivateParams,
-    TabActivationMode, TabCloseMode, TabCloseParams, TabCreateParams, TextParams, ThemeNameParams,
-    UrlParams,
+    BrowserAttachParams, BrowserInteractiveParams, BrowserTargetParams, ColorValueParams,
+    ControlError, DirectionParams, EmptyParams, ErrorCode, FileOpenParams, JavascriptParams,
+    KeyParams, KeyValueParams, PageQueryParams, PaneGlassParams, QueryParams, RenameParams,
+    RequestEnvelope, ResizeParams, SettingListParams, TabActivateParams, TabActivationMode,
+    TabCloseMode, TabCloseParams, TabCreateParams, TextParams, ThemeNameParams, UrlParams,
 };
 use local_control::selection::select_instance;
 use serde::Serialize;
@@ -487,6 +487,7 @@ pub(super) fn run_pane_command(
             PaneGlassParams {
                 enabled: args.enabled,
                 opacity: args.opacity,
+                pane_session_uuid: args.pane_session_uuid,
             },
             output_format,
         ),
@@ -499,32 +500,46 @@ pub(super) fn run_browser_command(
 ) -> Result<(), ControlError> {
     match command {
         BrowserCommand::Attach(args) => run_action_with_params(
-            args.target,
+            args.route.target,
             ActionKind::BrowserAttach,
             BrowserAttachParams {
                 url: args.url,
                 glass: !args.no_glass,
                 glass_opacity: args.glass_opacity,
+                ambience: args.route.ambience,
+                pane_session_uuid: args.route.pane_session_uuid,
             },
             output_format,
         ),
         BrowserCommand::Navigate(args) => run_action_with_params(
-            args.target,
+            args.route.target,
             ActionKind::BrowserNavigate,
-            UrlParams { url: args.url },
+            UrlParams {
+                url: args.url,
+                ambience: args.route.ambience,
+                pane_session_uuid: args.route.pane_session_uuid,
+            },
             output_format,
         ),
         BrowserCommand::Eval(args) => run_action_with_params(
-            args.target,
+            args.route.target,
             ActionKind::BrowserEval,
             JavascriptParams {
                 javascript: args.javascript,
+                ambience: args.route.ambience,
+                pane_session_uuid: args.route.pane_session_uuid,
             },
             output_format,
         ),
         BrowserCommand::Screenshot(args) => {
-            let data =
-                send_action_request(args.target, ActionKind::BrowserScreenshot, EmptyParams {})?;
+            let data = send_action_request(
+                args.route.target,
+                ActionKind::BrowserScreenshot,
+                BrowserTargetParams {
+                    ambience: args.route.ambience,
+                    pane_session_uuid: args.route.pane_session_uuid,
+                },
+            )?;
             if let Some(path) = args.output {
                 let encoded = data
                     .get("data_base64")
@@ -557,23 +572,31 @@ pub(super) fn run_browser_command(
             write_action_data(ActionKind::BrowserScreenshot, &data, output_format)
         }
         BrowserCommand::Interactive(args) => run_action_with_params(
-            args.target,
+            args.route.target,
             ActionKind::BrowserInteractive,
-            BooleanValueParams {
+            BrowserInteractiveParams {
                 value: args.enabled,
+                ambience: args.route.ambience,
+                pane_session_uuid: args.route.pane_session_uuid,
             },
             output_format,
         ),
         BrowserCommand::Status(args) => run_action_with_params(
-            args,
+            args.target,
             ActionKind::BrowserStatus,
-            EmptyParams {},
+            BrowserTargetParams {
+                ambience: args.ambience,
+                pane_session_uuid: args.pane_session_uuid,
+            },
             output_format,
         ),
         BrowserCommand::Detach(args) => run_action_with_params(
-            args,
+            args.target,
             ActionKind::BrowserDetach,
-            EmptyParams {},
+            BrowserTargetParams {
+                ambience: args.ambience,
+                pane_session_uuid: args.pane_session_uuid,
+            },
             output_format,
         ),
     }

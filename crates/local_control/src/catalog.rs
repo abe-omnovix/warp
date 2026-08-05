@@ -39,6 +39,8 @@ pub enum ActionParameterSpec {
     BindingName,
     BooleanValue,
     BrowserAttach,
+    BrowserInteractive,
+    BrowserTarget,
     ColorValue,
     Direction,
     FileOpen,
@@ -306,9 +308,9 @@ define_action_catalog! {
         BrowserAttach => { name: "browser.attach", status: Implemented, target: Window, params: BrowserAttach, result: Acknowledgement },
         BrowserNavigate => { name: "browser.navigate", status: Implemented, target: Window, params: Url, result: Acknowledgement },
         BrowserEval => { name: "browser.eval", status: Implemented, target: Window, params: Javascript, result: BrowserEvalResult },
-        BrowserScreenshot => { name: "browser.screenshot", status: Implemented, target: Window, params: None, result: BrowserScreenshot },
-        BrowserInteractive => { name: "browser.interactive", status: Implemented, target: Window, params: BooleanValue, result: Acknowledgement },
-        BrowserStatus => { name: "browser.status", status: Implemented, target: Window, params: None, result: BrowserStatus },
-        BrowserDetach => { name: "browser.detach", status: Implemented, target: Window, params: None, result: Acknowledgement },
+        BrowserScreenshot => { name: "browser.screenshot", status: Implemented, target: Window, params: BrowserTarget, result: BrowserScreenshot },
+        BrowserInteractive => { name: "browser.interactive", status: Implemented, target: Window, params: BrowserInteractive, result: Acknowledgement },
+        BrowserStatus => { name: "browser.status", status: Implemented, target: Window, params: BrowserTarget, result: BrowserStatus },
+        BrowserDetach => { name: "browser.detach", status: Implemented, target: Window, params: BrowserTarget, result: Acknowledgement },
     }
 }

@@ -2,18 +2,30 @@
 
 ## Architecture
 
-One `WarpBrowserUnderlayView : WKWebView` per window, created by an ObjC shim
+`WarpBrowserUnderlayView : WKWebView` instances are created by an ObjC shim
 (`crates/warpui/src/platform/mac/objc/browser_underlay.{h,m}`) and inserted as
-a sibling NSView *below* the Metal host view inside the window's content-view
-container:
+sibling NSViews *below* the Metal host view inside the window's content-view
+container. Since Phase 6 each window holds **one ambience underlay plus any
+number of agent underlays**, keyed by an `owner` string ("" = ambience, else
+the owning pane's terminal-session UUID hex):
 
 ```
 NSWindow (backgroundColor ≈ clear)
 └─ container NSView                      (plain; contentView)
-   ├─ WarpBrowserUnderlayView            (WKWebView; bottom)
+   ├─ WarpBrowserUnderlayView owner=""   (ambience; absolute back)
+   ├─ WarpBrowserUnderlayView owner=<uuid> (agent; hidden unless its pane's
+   │                                        tab is frontmost in this window)
    └─ WarpHostView                       (CAMetalLayer, opaque = NO;
       └─ terminal scene                   render pass clears alpha 0.0)
 ```
+
+Ownership model: the **ambience** underlay is the user's default background
+(aquarium). Agents have no route to it — every agent action is pane-keyed.
+An **agent** underlay belongs to one pane and is composited only while that
+pane's tab is the window's active tab (`browser_underlay_set_visible`);
+hiding also clears its interactive state. The app-side visibility sync runs
+through the tab-activation choke point (`Workspace::set_active_tab_index`)
+plus pane-move re-homing in `sync_agent_visibility`.
 
 Why this composites correctly with **zero Warp render-loop changes**: the
 window's Metal surface was already non-opaque with an alpha-0 clear color
@@ -50,10 +62,14 @@ disabling it returns first responder to the host view.
 - `warpui_core/platform/mod.rs` — `WindowManager` trait methods with default
   no-ops (only macOS overrides), so winit/headless/test builds need no code.
 - `warpui_core/windowing/state.rs` — public wrappers (`app.windows().…`).
-- `app/src/browser_underlay.rs` — `BrowserUnderlayState` singleton model
-  mirroring platform state for rendering; attach/detach helpers; env-var
-  smoke hook.
-- `app/src/workspace/{view,util}.rs` — glass path when underlay attached.
+- `app/src/browser_underlay.rs` — `BrowserUnderlayState` singleton model:
+  per-window ambience + pane-keyed agent underlays, visibility sync,
+  lifecycle (pane-close detach, 15-min idle TTL sweeper, cap of 3 agent
+  underlays per window with LRU eviction), hotkey/interactive ownership.
+- `app/src/workspace/{view,util}.rs` — glass path when a *visible* underlay
+  exists (ambience: whole-window glass; visible agent: porthole pane glass).
+- `app/src/local_control/mcp_endpoint.rs` — Warp-hosted stateless `/mcp`
+  endpoint (see MCP.md) reusing the bridge dispatch path.
 
 ## Decisions (ADR-style)
 
@@ -91,9 +107,10 @@ view geometry mirroring. Per-pane *webviews* are Phase 5.
    (oneshot) for async eval/snapshot results; `allow_browser_control`
    (default off) in Settings › Scripting; `pane.list` gains `session_uuid`;
    `warpctrl browser …` subcommands.
-4. **`warp-browser-mcp`** — workspace crate; rmcp stdio server linking
-   `local_control` client directly. Pane binding order: explicit param →
-   `--pane-session-uuid` → `WARP_TERMINAL_SESSION_UUID` env → active pane.
+4. **`warp-browser-mcp`** — *retired in Phase 6.* Was a workspace crate
+   running an rmcp stdio server; replaced by the Warp-hosted `/mcp`
+   endpoint, which removes the extra binary, the broker round-trip per
+   call, and the active-pane binding fallback.
 5. **Partially shipped: interactive-mode hotkeys + indicator.** A local
    NSEvent monitor (installed with the first attach; local monitors see
    events before the first responder, so the gestures work while the
@@ -107,11 +124,25 @@ view geometry mirroring. Per-pane *webviews* are Phase 5.
    `browser_underlay::handle_hotkey`, so the app model stays the single
    owner of interactive state (`interactive` latched ‖ `interactive_hold`
    momentary). While effectively interactive the workspace draws a 2px
-   accent border. Still later: per-pane webview rects (mirror
-   `PaneId::position_id()` → `element_position_by_id` geometry into native
-   view frames, or Route B frame-push via `AssetSource::Raw` for
-   cross-platform); rebindable gesture key (currently fixed to F18 in the
-   ObjC monitor).
+   accent border. The gesture targets the window's *visible* underlay, so
+   in an agent tab it controls the agent's browser and elsewhere the
+   ambience.
+6. **Pane-isolated agent browsers + Warp-hosted `/mcp`** — the
+   ambience/agent ownership split above; `browser.*` control actions route
+   by owner (`ambience: true` is warpctrl/human-only; agents always
+   pane-keyed, with `ambience` and `pane_session_uuid` mutually
+   exclusive); the stateless Streamable HTTP endpoint (MCP 2026-07-28) on
+   the local-control server with per-launch bearer token injected as
+   `WARP_MCP_URL`/`WARP_MCP_TOKEN` into pane shells; lifecycle = detach on
+   pane close, 15-minute idle TTL sweep, cap 3 agent underlays per window
+   (LRU evicted). Hidden agent tabs keep playing audio (WKWebView is
+   `hidden`, not suspended); screenshots of hidden tabs are annotated
+   `tab_visible: false`.
+
+   Still later: per-pane webview rects (mirror `PaneId::position_id()` →
+   `element_position_by_id` geometry into native view frames, or Route B
+   frame-push via `AssetSource::Raw` for cross-platform); rebindable
+   gesture key (currently fixed to F18 in the ObjC monitor).
 
 ## Known risks
 

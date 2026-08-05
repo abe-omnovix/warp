@@ -1528,6 +1528,7 @@ pub(crate) fn initialize_app(
 
     ctx.add_singleton_model(|_ctx| GPUState::new());
     ctx.add_singleton_model(|_ctx| crate::browser_underlay::BrowserUnderlayState::new());
+    ctx.add_singleton_model(|_ctx| crate::browser_underlay::AgentBrowserSweeper::new());
     crate::browser_underlay::init(ctx);
 
     PrivacySettings::register_singleton(ctx);
@@ -2869,8 +2870,8 @@ pub(crate) fn app_callbacks(
         on_window_resized: Some(Box::new(move |ctx| {
             ctx.dispatch_global_action("workspace:save_app", &());
         })),
-        on_browser_underlay_hotkey: Some(Box::new(|window_id, event, ctx| {
-            crate::browser_underlay::handle_hotkey(window_id, event, ctx);
+        on_browser_underlay_hotkey: Some(Box::new(|window_id, owner, event, ctx| {
+            crate::browser_underlay::handle_hotkey(window_id, owner, event, ctx);
         })),
         ..Default::default()
     }

@@ -1,10 +1,11 @@
 # Browser underlay — session handoff
 
-State: **Phases 1–4 implemented and committed** on `abe/browser-underlay`
+State: **Phases 1–6 implemented and committed** on `abe/browser-underlay`
 (fork `abe-omnovix/warp`, upstream `warpdotdev/warp`, base master `af2f7c61`).
-Phase 1 `ffdf295c`, Phase 2 `114b66ff`, Phase 3 `4753b8bc`, Phase 4 is the
-commit adding this paragraph. Phase 5 stays documented-only. Remaining work is
-runtime verification (below), which needs a real Metal build.
+Phase 1 `ffdf295c`, Phase 2 `114b66ff`, Phase 3 `4753b8bc`, Phase 4
+`31e75a30` (retired again in Phase 6), Phase 5 hotkey slice `4d530977`,
+Phase 6 is the commit adding this paragraph. Remaining work is the runtime
+verification tail (below).
 
 ## Standing instruction from Abe
 
@@ -54,6 +55,34 @@ settled — do not re-litigate.
   local-control client calls run via `spawn_blocking`. Unit tests in
   `src/main_tests.rs`.
 
+- **Phase 5 slice (`4d530977`)** — interactive-mode hotkeys: OS-level
+  CapsLock→F18 remap (hidutil, documented in README), local NSEvent monitor
+  (tap = latched toggle, >300 ms hold = momentary, ⌘Esc force-off),
+  first-responder transfer with the interactive flag set *before* the
+  transfer, hitTest/sendEvent/performKeyEquivalent routing fixes, accent
+  border while interactive, fake-fullscreen JS shim (keeps element
+  fullscreen inside the underlay instead of splitting to a Space), and a
+  pointer-events guard so inert pages show no hover UI.
+
+- **Phase 6 (this commit)** — pane-isolated agent browsers + Warp-hosted
+  MCP: owner-keyed multi-webview platform layer (`owner` "" = ambience at
+  the absolute back; agent underlays keyed by terminal-session UUID hex,
+  created hidden, composited only while their pane's tab is frontmost —
+  `browser_underlay_set_visible`, visibility sync via
+  `Workspace::set_active_tab_index`, re-homing on pane moves);
+  `BrowserUnderlayOwner` plumbing through `WindowManager`; app model split
+  into ambience (settings-driven, agent-unreachable) vs agent underlays
+  with lifecycle (detach on pane close; 15-min idle TTL sweeper; cap 3 per
+  window, LRU-evicted); control-plane routing flags (`--ambience`
+  human-only, mutually exclusive with `--pane-session-uuid`); the
+  stateless Streamable HTTP `/mcp` endpoint (MCP 2026-07-28: no sessions,
+  legacy `initialize` accommodation, `x-mcp-header`-annotated `pane`
+  argument, `X-Warp-Pane` header binding, per-launch bearer token) in
+  `app/src/local_control/mcp_endpoint.rs`, with `WARP_MCP_URL` /
+  `WARP_MCP_TOKEN` injected into new pane shells; `crates/warp_browser_mcp`
+  deleted. Tests: `mcp_endpoint_tests.rs`, rewritten
+  `browser_underlay_tests.rs` (ownership/visibility/eviction/hotkey).
+
 ## Later hooks (out of scope)
 
 - `CallMCPToolExecutor` already holds the calling pane's `terminal_view_id`
@@ -93,11 +122,16 @@ settled — do not re-litigate.
   - Dev-channel binaries (`warp`, `stable` bins) abort at startup without the
     private `warp-channel-config` on PATH — use the `warp-oss` bin (inline
     config) for source-built runs on this machine.
-- Still outstanding: `<video>`-element half of the occlusion spike (needs
-  `allow_browser_control` enabled in the OSS build's Settings › Scripting —
-  waiting on Abe; then `browser navigate` to a muted autoplay video and
-  `browser eval` that `currentTime` advances), and the manual settings-page
-  search pass per `gui-settings-ui` "How to verify".
+- Phase 5 slice verified live end-to-end (CapsLock tap/hold/⌘Esc, YouTube
+  playback with pointer-guard + fake fullscreen, stdio MCP demo before its
+  retirement). Scripting + `allow_browser_control` are enabled in Abe's
+  build.
+- Still outstanding: `<video>`-element half of the occlusion spike
+  (`browser navigate` to a muted autoplay video, `browser eval` that
+  `currentTime` advances), the manual settings-page search pass per
+  `gui-settings-ui` "How to verify", and a live `/mcp` demo from inside a
+  Warp pane (`curl -X POST "$WARP_MCP_URL" -H "Authorization: Bearer
+  $WARP_MCP_TOKEN" …` then Claude Code registration per MCP.md).
 
 ## Local machine state (for the session running on Abe's Mac)
 

@@ -52,9 +52,19 @@ pub struct AppCallbacks {
     /// Callback to hook into a notification for when the cpu is about to go to sleep.
     pub on_cpu_will_sleep: Option<Box<dyn FnMut(&mut AppContext)>>,
     /// Callback for interactive-mode hotkeys on a window's background webview
-    /// (see [`crate::platform::BrowserUnderlayHotkey`]).
-    pub on_browser_underlay_hotkey:
-        Option<Box<dyn FnMut(WindowId, crate::platform::BrowserUnderlayHotkey, &mut AppContext)>>,
+    /// (see [`crate::platform::BrowserUnderlayHotkey`]). The owner identifies
+    /// which underlay the gesture targeted (the window's visible one).
+    #[allow(clippy::type_complexity)]
+    pub on_browser_underlay_hotkey: Option<
+        Box<
+            dyn FnMut(
+                WindowId,
+                crate::platform::BrowserUnderlayOwner,
+                crate::platform::BrowserUnderlayHotkey,
+                &mut AppContext,
+            ),
+        >,
+    >,
 }
 
 /// A helper structure to simplify and standardize the act of making calls from
@@ -231,10 +241,12 @@ impl AppCallbackDispatcher {
     pub fn browser_underlay_hotkey(
         &mut self,
         window_id: WindowId,
+        owner: crate::platform::BrowserUnderlayOwner,
         event: crate::platform::BrowserUnderlayHotkey,
     ) {
         if let Some(callback) = &mut self.callbacks.on_browser_underlay_hotkey {
-            self.ui_app.update(|ctx| callback(window_id, event, ctx));
+            self.ui_app
+                .update(|ctx| callback(window_id, owner.clone(), event, ctx));
         }
     }
 

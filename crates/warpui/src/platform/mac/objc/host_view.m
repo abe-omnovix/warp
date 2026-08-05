@@ -78,7 +78,7 @@ void warp_marked_text_cleared(WarpHostView *);
 - (NSView *)hitTest:(NSPoint)point {
     NSWindow *window = self.window;
     if (window != nil) {
-        WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window);
+        WarpBrowserUnderlayView *underlay = browser_underlay_visible_for_window(window);
         if (underlay != nil && underlay.interactive) {
             return nil;
         }

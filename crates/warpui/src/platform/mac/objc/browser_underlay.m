@@ -4,8 +4,15 @@
 
 @implementation WarpBrowserUnderlayView
 
-// While inert, the underlay is invisible to hit testing so all mouse events
-// fall through to the host view exactly as if the underlay did not exist.
+- (void)dealloc {
+    [_owner release];
+    [super dealloc];
+}
+
+// While inert or hidden, the underlay is invisible to hit testing so all
+// mouse events fall through to the host view exactly as if the underlay did
+// not exist. (AppKit already skips hidden views during hit testing; the
+// interactive check covers the visible-but-inert case.)
 - (NSView *)hitTest:(NSPoint)point {
     return self.interactive ? [super hitTest:point] : nil;
 }
@@ -16,7 +23,7 @@
 
 @end
 
-// Returns the container content view that can host an underlay, or nil. After
+// Returns the container content view that can host underlays, or nil. After
 // the content-view restructure, WarpWindow's contentView is a plain container
 // whose subviews include the WarpHostView; panels still use the host view as
 // the content view directly and cannot host an underlay.
@@ -35,47 +42,42 @@ static NSURL *url_from_cstr(const char *url) {
     return [NSURL URLWithString:[NSString stringWithUTF8String:url]];
 }
 
-WarpBrowserUnderlayView *browser_underlay_for_window(NSWindow *window) {
+static NSString *owner_from_cstr(const char *owner) {
+    if (owner == NULL) {
+        return @"";
+    }
+    return [NSString stringWithUTF8String:owner];
+}
+
+WarpBrowserUnderlayView *browser_underlay_for_window(NSWindow *window, const char *owner) {
     NSView *container = underlay_container_for_window(window);
+    NSString *wanted = owner_from_cstr(owner);
     for (NSView *subview in container.subviews) {
-        if ([subview isKindOfClass:[WarpBrowserUnderlayView class]]) {
+        if ([subview isKindOfClass:[WarpBrowserUnderlayView class]] &&
+            [((WarpBrowserUnderlayView *)subview).owner isEqualToString:wanted]) {
             return (WarpBrowserUnderlayView *)subview;
         }
     }
     return nil;
 }
 
-BOOL browser_underlay_attach(NSWindow *window, const char *url) {
+WarpBrowserUnderlayView *browser_underlay_visible_for_window(NSWindow *window) {
     NSView *container = underlay_container_for_window(window);
-    if (container == nil) {
-        return NO;
-    }
-
-    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window);
-    if (underlay == nil) {
-        WKWebViewConfiguration *configuration = [[[WKWebViewConfiguration alloc] init] autorelease];
-        // No persistent cookies/storage: the underlay is an ambient surface,
-        // not a general-purpose browser profile.
-        configuration.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
-        // Ambient video backgrounds must start without a user gesture. Sound
-        // still requires the page to be unmuted explicitly (interactive click
-        // or JS), matching platform autoplay policies.
-        configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
-        // Advertise the HTML5 element-fullscreen API (off by default in
-        // WKWebView) so players show their fullscreen button at all…
-        if (@available(macOS 12.3, *)) {
-            configuration.preferences.elementFullscreenEnabled = YES;
+    // Subviews are ordered back-to-front; the last unhidden underlay is the
+    // frontmost one the user sees.
+    WarpBrowserUnderlayView *visible = nil;
+    for (NSView *subview in container.subviews) {
+        if ([subview isKindOfClass:[WarpBrowserUnderlayView class]] && !subview.isHidden) {
+            visible = (WarpBrowserUnderlayView *)subview;
         }
-        // …but replace its implementation inside the page: WebKit presents
-        // element fullscreen in a separate fullscreen Space, detaching the
-        // video from the window. The shim below pins the requesting element
-        // to the viewport instead — the underlay fills the window, so
-        // "fullscreen" bleeds across the whole app background behind the
-        // terminal glass — and mimics the fullscreen API surface
-        // (fullscreenElement, fullscreenchange, the webkit-prefixed
-        // variants) so players such as YouTube run their own fullscreen
-        // layout and keep their controls working.
-        NSString *fakeFullscreenShim = @""
+    }
+    return visible;
+}
+
+// The pointer guard and fake-fullscreen user scripts; see the comments at
+// their installation site in `browser_underlay_attach`.
+static NSString *fake_fullscreen_shim(void) {
+    return @""
             "(function () {\n"
             "  if (window.__warpFakeFullscreen) { return; }\n"
             "  window.__warpFakeFullscreen = true;\n"
@@ -139,19 +141,10 @@ BOOL browser_underlay_attach(NSWindow *window, const char *url) {
             "    if (event.key === 'Escape' && fsElement != null) { exit(); }\n"
             "  }, true);\n"
             "})();";
-        WKUserScript *fakeFullscreen =
-            [[[WKUserScript alloc] initWithSource:fakeFullscreenShim
-                                    injectionTime:WKUserScriptInjectionTimeAtDocumentStart
-                                 forMainFrameOnly:NO] autorelease];
-        [configuration.userContentController addUserScript:fakeFullscreen];
-        // While inert, the page must not react to the pointer at all:
-        // WebKit's mouse tracking follows the cursor irrespective of the
-        // native hit-test gating, so hover UI (video controls, tooltips)
-        // would appear under the terminal. Pages start with pointer-events
-        // disabled; `browser_underlay_set_interactive` toggles it via
-        // `__warpSetInteractive`. (A page navigated while interactive stays
-        // inert until the next toggle — acceptable, the gesture re-runs it.)
-        NSString *pointerGuardShim = @""
+}
+
+static NSString *pointer_guard_shim(void) {
+    return @""
             "(function () {\n"
             "  if (window.__warpPointerGuard) { return; }\n"
             "  window.__warpPointerGuard = true;\n"
@@ -162,8 +155,53 @@ BOOL browser_underlay_attach(NSWindow *window, const char *url) {
             "  };\n"
             "  window.__warpSetInteractive(false);\n"
             "})();";
+}
+
+BOOL browser_underlay_attach(NSWindow *window, const char *owner, const char *url) {
+    NSView *container = underlay_container_for_window(window);
+    if (container == nil) {
+        return NO;
+    }
+
+    NSString *ownerString = owner_from_cstr(owner);
+    BOOL isAmbience = ownerString.length == 0;
+    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window, owner);
+    if (underlay == nil) {
+        WKWebViewConfiguration *configuration = [[[WKWebViewConfiguration alloc] init] autorelease];
+        // No persistent cookies/storage: underlays are ambient surfaces and
+        // agent scratch browsers, not general-purpose browser profiles.
+        configuration.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
+        // Ambient video backgrounds must start without a user gesture. Sound
+        // still requires the page to be unmuted explicitly (interactive click
+        // or JS), matching platform autoplay policies.
+        configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
+        // Advertise the HTML5 element-fullscreen API (off by default in
+        // WKWebView) so players show their fullscreen button at all…
+        if (@available(macOS 12.3, *)) {
+            configuration.preferences.elementFullscreenEnabled = YES;
+        }
+        // …but replace its implementation inside the page: WebKit presents
+        // element fullscreen in a separate fullscreen Space, detaching the
+        // video from the window. The shim pins the requesting element to the
+        // viewport instead — the underlay fills the window, so "fullscreen"
+        // bleeds across the whole app background behind the terminal glass —
+        // and mimics the fullscreen API surface (fullscreenElement,
+        // fullscreenchange, the webkit-prefixed variants) so players such as
+        // YouTube run their own fullscreen layout with working controls.
+        WKUserScript *fakeFullscreen =
+            [[[WKUserScript alloc] initWithSource:fake_fullscreen_shim()
+                                    injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                 forMainFrameOnly:NO] autorelease];
+        [configuration.userContentController addUserScript:fakeFullscreen];
+        // While inert, the page must not react to the pointer at all:
+        // WebKit's mouse tracking follows the cursor irrespective of the
+        // native hit-test gating, so hover UI (video controls, tooltips)
+        // would appear under the terminal. Pages start with pointer-events
+        // disabled; `browser_underlay_set_interactive` toggles it via
+        // `__warpSetInteractive`. (A page navigated while interactive stays
+        // inert until the next toggle — acceptable, the gesture re-runs it.)
         WKUserScript *pointerGuard =
-            [[[WKUserScript alloc] initWithSource:pointerGuardShim
+            [[[WKUserScript alloc] initWithSource:pointer_guard_shim()
                                     injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                                  forMainFrameOnly:NO] autorelease];
         [configuration.userContentController addUserScript:pointerGuard];
@@ -171,10 +209,21 @@ BOOL browser_underlay_attach(NSWindow *window, const char *url) {
         underlay = [[[WarpBrowserUnderlayView alloc] initWithFrame:container.bounds
                                                      configuration:configuration] autorelease];
         underlay.interactive = NO;
+        underlay.owner = ownerString;
         underlay.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 
-        WarpHostView *hostView = warp_host_view_for_window(window);
-        [container addSubview:underlay positioned:NSWindowBelow relativeTo:hostView];
+        if (isAmbience) {
+            // The ambience underlay lives at the very back, behind any agent
+            // underlays.
+            [container addSubview:underlay positioned:NSWindowBelow relativeTo:nil];
+        } else {
+            // Agent underlays sit directly behind the Metal surface, in
+            // front of the ambience. They start hidden: the application
+            // unhides them only while their pane's tab is frontmost.
+            WarpHostView *hostView = warp_host_view_for_window(window);
+            [container addSubview:underlay positioned:NSWindowBelow relativeTo:hostView];
+            underlay.hidden = YES;
+        }
     }
 
     NSURL *requestUrl = url_from_cstr(url);
@@ -184,8 +233,8 @@ BOOL browser_underlay_attach(NSWindow *window, const char *url) {
     return YES;
 }
 
-void browser_underlay_navigate(NSWindow *window, const char *url) {
-    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window);
+void browser_underlay_navigate(NSWindow *window, const char *owner, const char *url) {
+    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window, owner);
     NSURL *requestUrl = url_from_cstr(url);
     if (underlay != nil && requestUrl != nil) {
         [underlay loadRequest:[NSURLRequest requestWithURL:requestUrl]];
@@ -211,11 +260,11 @@ static NSString *string_from_eval_result(id result) {
     return [[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] autorelease];
 }
 
-void browser_underlay_eval(NSWindow *window, const char *js, void *ctx,
+void browser_underlay_eval(NSWindow *window, const char *owner, const char *js, void *ctx,
                            BrowserUnderlayStringCallback callback) {
-    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window);
+    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window, owner);
     if (underlay == nil || js == NULL) {
-        callback(ctx, NULL, "no browser underlay attached to this window");
+        callback(ctx, NULL, "no browser underlay attached for this owner");
         return;
     }
     [underlay evaluateJavaScript:[NSString stringWithUTF8String:js]
@@ -228,11 +277,11 @@ void browser_underlay_eval(NSWindow *window, const char *js, void *ctx,
                }];
 }
 
-void browser_underlay_snapshot(NSWindow *window, void *ctx,
+void browser_underlay_snapshot(NSWindow *window, const char *owner, void *ctx,
                                BrowserUnderlayDataCallback callback) {
-    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window);
+    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window, owner);
     if (underlay == nil) {
-        callback(ctx, NULL, 0, "no browser underlay attached to this window");
+        callback(ctx, NULL, 0, "no browser underlay attached for this owner");
         return;
     }
     [underlay takeSnapshotWithConfiguration:nil
@@ -256,8 +305,8 @@ void browser_underlay_snapshot(NSWindow *window, void *ctx,
                           }];
 }
 
-void browser_underlay_set_interactive(NSWindow *window, BOOL interactive) {
-    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window);
+void browser_underlay_set_interactive(NSWindow *window, const char *owner, BOOL interactive) {
+    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window, owner);
     if (underlay == nil) {
         return;
     }
@@ -286,6 +335,18 @@ void browser_underlay_set_interactive(NSWindow *window, BOOL interactive) {
     [underlay evaluateJavaScript:pointerJs completionHandler:nil];
 }
 
+void browser_underlay_set_visible(NSWindow *window, const char *owner, BOOL visible) {
+    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window, owner);
+    if (underlay == nil || underlay.isHidden == !visible) {
+        return;
+    }
+    if (!visible && underlay.interactive) {
+        // A hidden underlay must never own input.
+        browser_underlay_set_interactive(window, owner, NO);
+    }
+    underlay.hidden = !visible;
+}
+
 // --- Interactive-mode hotkeys ------------------------------------------------
 //
 // A single app-local NSEvent monitor recognizes the interactive-mode gestures.
@@ -293,7 +354,8 @@ void browser_underlay_set_interactive(NSWindow *window, BOOL interactive) {
 // responder, which is what makes the gestures work while the webview owns key
 // events. The monitor only recognizes gestures; the application flips
 // interactive state in response to the callback, staying the single owner of
-// that state.
+// that state. Gestures target the window's *visible* underlay (the agent's
+// while its tab is frontmost, otherwise the ambience).
 //
 // The gesture key is F18 — a key no physical keyboard emits — intended to be
 // produced by remapping CapsLock to F18 at the OS level (hidutil/Karabiner):
@@ -312,7 +374,8 @@ static id hotkey_monitor = nil;
 static BOOL f18_down = NO;
 static BOOL f18_hold_active = NO;
 static uint64_t hotkey_generation = 0;
-static NSWindow *f18_window = nil; // retained while the key is down
+static NSWindow *f18_window = nil;               // retained while the key is down
+static WarpBrowserUnderlayView *f18_target = nil; // retained while the key is down
 
 static const unsigned short kKeyCodeEscape = 53;
 static const unsigned short kKeyCodeF18 = 79;
@@ -327,6 +390,14 @@ static void hotkey_clear_f18(void) {
     hotkey_generation += 1;
     [f18_window release];
     f18_window = nil;
+    [f18_target release];
+    f18_target = nil;
+}
+
+static void hotkey_emit(NSWindow *window, WarpBrowserUnderlayView *underlay, int event) {
+    if (hotkey_callback != NULL && window != nil && underlay != nil) {
+        hotkey_callback(hotkey_ctx, window, underlay.owner.UTF8String, event);
+    }
 }
 
 static NSEvent *hotkey_handle_event(NSEvent *event) {
@@ -339,18 +410,21 @@ static NSEvent *hotkey_handle_event(NSEvent *event) {
             return nil; // swallow auto-repeat while held
         }
         NSWindow *window = event.window;
-        if (window == nil || browser_underlay_for_window(window) == nil) {
+        WarpBrowserUnderlayView *underlay =
+            window != nil ? browser_underlay_visible_for_window(window) : nil;
+        if (underlay == nil) {
             return event;
         }
         f18_down = YES;
         f18_window = [window retain];
+        f18_target = [underlay retain];
         uint64_t generation = ++hotkey_generation;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kTapMaxMs * NSEC_PER_MSEC),
                        dispatch_get_main_queue(), ^{
                          if (f18_down && generation == hotkey_generation && f18_window != nil) {
                              f18_hold_active = YES;
-                             hotkey_callback(hotkey_ctx, f18_window,
-                                             BrowserUnderlayHotkeyHoldStart);
+                             hotkey_emit(f18_window, f18_target,
+                                         BrowserUnderlayHotkeyHoldStart);
                          }
                        });
         return nil;
@@ -361,20 +435,18 @@ static NSEvent *hotkey_handle_event(NSEvent *event) {
             return event;
         }
         NSWindow *window = [[f18_window retain] autorelease];
+        WarpBrowserUnderlayView *target = [[f18_target retain] autorelease];
         BOOL was_hold = f18_hold_active;
         hotkey_clear_f18();
-        if (window != nil) {
-            hotkey_callback(hotkey_ctx, window,
-                            was_hold ? BrowserUnderlayHotkeyHoldEnd
-                                     : BrowserUnderlayHotkeyToggle);
-        }
+        hotkey_emit(window, target,
+                    was_hold ? BrowserUnderlayHotkeyHoldEnd : BrowserUnderlayHotkeyToggle);
         return nil;
     }
 
     if (event.type == NSEventTypeKeyDown && event.keyCode == kKeyCodeEscape) {
         NSWindow *window = event.window;
         WarpBrowserUnderlayView *underlay =
-            window != nil ? browser_underlay_for_window(window) : nil;
+            window != nil ? browser_underlay_visible_for_window(window) : nil;
         // Ignore a latched caps-lock state (possible before the CapsLock
         // remap, or from another keyboard) when matching the chord.
         NSEventModifierFlags mods =
@@ -382,7 +454,7 @@ static NSEvent *hotkey_handle_event(NSEvent *event) {
             ~NSEventModifierFlagCapsLock;
         if (underlay != nil && underlay.interactive && mods == NSEventModifierFlagCommand) {
             hotkey_clear_f18();
-            hotkey_callback(hotkey_ctx, window, BrowserUnderlayHotkeyForceOff);
+            hotkey_emit(window, underlay, BrowserUnderlayHotkeyForceOff);
             return nil;
         }
     }
@@ -407,10 +479,12 @@ void browser_underlay_set_hotkey_callback(void *ctx, BrowserUnderlayHotkeyCallba
                         object:nil
                          queue:[NSOperationQueue mainQueue]
                     usingBlock:^(NSNotification *note) {
-                      if (f18_hold_active && f18_window != nil && hotkey_callback != NULL) {
+                      (void)note;
+                      if (f18_hold_active && f18_window != nil) {
                           NSWindow *window = [[f18_window retain] autorelease];
+                          WarpBrowserUnderlayView *target = [[f18_target retain] autorelease];
                           hotkey_clear_f18();
-                          hotkey_callback(hotkey_ctx, window, BrowserUnderlayHotkeyHoldEnd);
+                          hotkey_emit(window, target, BrowserUnderlayHotkeyHoldEnd);
                       } else if (f18_down) {
                           hotkey_clear_f18();
                       }
@@ -418,17 +492,17 @@ void browser_underlay_set_hotkey_callback(void *ctx, BrowserUnderlayHotkeyCallba
     }
 }
 
-void browser_underlay_detach(NSWindow *window) {
-    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window);
+void browser_underlay_detach(NSWindow *window, const char *owner) {
+    WarpBrowserUnderlayView *underlay = browser_underlay_for_window(window, owner);
     if (underlay == nil) {
         return;
     }
-    // Drop any in-flight hotkey gesture that belongs to this window.
-    if (f18_window == window) {
+    // Drop any in-flight hotkey gesture that targets this underlay.
+    if (f18_target == underlay) {
         hotkey_clear_f18();
     }
     if (underlay.interactive) {
-        browser_underlay_set_interactive(window, NO);
+        browser_underlay_set_interactive(window, owner, NO);
     }
     // Stop any playing media before the view is torn down.
     [underlay loadHTMLString:@"" baseURL:nil];

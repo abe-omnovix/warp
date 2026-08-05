@@ -14,10 +14,14 @@ A live browser rendered behind the terminal. Two user stories:
 
 ## Scope decisions (v1)
 
-- **One webview per window**, not per pane. The per-pane experience comes from
-  per-pane *glass*: only the agent's pane goes translucent, making it a
-  porthole onto the window-level browser behind it. True per-pane webview
-  rects are a later phase (see TECH.md Phase 5).
+- **One ambience browser per window plus one browser per agent pane**
+  (Phase 6; v1 shipped window-level only). The ambience stream is the
+  user's — agents can never navigate it away. An agent's browser lives
+  behind the tab its pane belongs to and is visible only while that tab is
+  frontmost; from any other tab the ambience shows instead. The per-pane
+  experience still comes from per-pane *glass*: the agent's pane is a
+  translucent porthole onto its browser. True per-pane webview rects are a
+  later phase (see TECH.md).
 - **Inert by default.** The browser can never steal keyboard or mouse input.
   Interactive mode is an explicit, reversible toggle (agent tool or
   `warpctrl`), and Esc-style focus return keeps the terminal primary.

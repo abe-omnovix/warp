@@ -153,37 +153,75 @@ impl platform::WindowManager for WindowManager {
         // no-op on MacOS. This is only available on Windows.
     }
 
-    fn attach_background_webview(&self, window_id: WindowId, url: &str) -> bool {
-        Window::attach_background_webview(window_id, url)
+    fn attach_background_webview(
+        &self,
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+        url: &str,
+    ) -> bool {
+        Window::attach_background_webview(window_id, owner, url)
     }
 
-    fn background_webview_attached(&self, window_id: WindowId) -> bool {
-        Window::background_webview_attached(window_id)
+    fn background_webview_attached(
+        &self,
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+    ) -> bool {
+        Window::background_webview_attached(window_id, owner)
     }
 
-    fn navigate_background_webview(&self, window_id: WindowId, url: &str) {
-        Window::navigate_background_webview(window_id, url)
+    fn navigate_background_webview(
+        &self,
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+        url: &str,
+    ) {
+        Window::navigate_background_webview(window_id, owner, url)
     }
 
     fn eval_background_webview_js(
         &self,
         window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
         js: &str,
         callback: BrowserJsEvalCallback,
     ) {
-        Window::eval_background_webview_js(window_id, js, callback)
+        Window::eval_background_webview_js(window_id, owner, js, callback)
     }
 
-    fn snapshot_background_webview(&self, window_id: WindowId, callback: BrowserSnapshotCallback) {
-        Window::snapshot_background_webview(window_id, callback)
+    fn snapshot_background_webview(
+        &self,
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+        callback: BrowserSnapshotCallback,
+    ) {
+        Window::snapshot_background_webview(window_id, owner, callback)
     }
 
-    fn set_background_webview_interactive(&self, window_id: WindowId, interactive: bool) {
-        Window::set_background_webview_interactive(window_id, interactive)
+    fn set_background_webview_interactive(
+        &self,
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+        interactive: bool,
+    ) {
+        Window::set_background_webview_interactive(window_id, owner, interactive)
     }
 
-    fn detach_background_webview(&self, window_id: WindowId) {
-        Window::detach_background_webview(window_id)
+    fn set_background_webview_visible(
+        &self,
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+        visible: bool,
+    ) {
+        Window::set_background_webview_visible(window_id, owner, visible)
+    }
+
+    fn detach_background_webview(
+        &self,
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+    ) {
+        Window::detach_background_webview(window_id, owner)
     }
 
     fn set_window_title(&self, window_id: WindowId, title: &str) {
@@ -510,22 +548,26 @@ unsafe extern "C" {
     fn open_url(urlString: &NSString) -> Bool;
     fn set_titlebar_height(window: &NSWindow, height: f64);
     fn warp_host_view_for_window(window: &NSWindow) -> *mut NSView;
-    fn browser_underlay_attach(window: &NSWindow, url: *const c_char) -> Bool;
-    fn browser_underlay_for_window(window: &NSWindow) -> *mut NSView;
-    fn browser_underlay_navigate(window: &NSWindow, url: *const c_char);
+    fn browser_underlay_attach(window: &NSWindow, owner: *const c_char, url: *const c_char)
+    -> Bool;
+    fn browser_underlay_for_window(window: &NSWindow, owner: *const c_char) -> *mut NSView;
+    fn browser_underlay_navigate(window: &NSWindow, owner: *const c_char, url: *const c_char);
     fn browser_underlay_eval(
         window: &NSWindow,
+        owner: *const c_char,
         js: *const c_char,
         ctx: *mut c_void,
         callback: BrowserUnderlayStringCallback,
     );
     fn browser_underlay_snapshot(
         window: &NSWindow,
+        owner: *const c_char,
         ctx: *mut c_void,
         callback: BrowserUnderlayDataCallback,
     );
-    fn browser_underlay_set_interactive(window: &NSWindow, interactive: Bool);
-    fn browser_underlay_detach(window: &NSWindow);
+    fn browser_underlay_set_interactive(window: &NSWindow, owner: *const c_char, interactive: Bool);
+    fn browser_underlay_set_visible(window: &NSWindow, owner: *const c_char, visible: Bool);
+    fn browser_underlay_detach(window: &NSWindow, owner: *const c_char);
     fn browser_underlay_set_hotkey_callback(
         ctx: *mut c_void,
         callback: BrowserUnderlayHotkeyCallbackC,
@@ -566,11 +608,23 @@ extern "C" fn browser_eval_trampoline(
 }
 
 /// C-side callback signature for interactive-mode hotkey gestures; see
-/// `browser_underlay.h`. `event` values match `BrowserUnderlayHotkey`.
+/// `browser_underlay.h`. `event` values match `BrowserUnderlayHotkey`; `owner`
+/// identifies the targeted underlay ("" = ambience).
 type BrowserUnderlayHotkeyCallbackC =
-    extern "C" fn(ctx: *mut c_void, window: *mut NSWindow, event: i32);
+    extern "C" fn(ctx: *mut c_void, window: *mut NSWindow, owner: *const c_char, event: i32);
 
-extern "C" fn browser_hotkey_trampoline(_ctx: *mut c_void, window: *mut NSWindow, event: i32) {
+extern "C" fn browser_hotkey_trampoline(
+    _ctx: *mut c_void,
+    window: *mut NSWindow,
+    owner: *const c_char,
+    event: i32,
+) {
+    // SAFETY: per the C contract `owner` is valid for the duration of the call.
+    let owner = platform::BrowserUnderlayOwner::from_key(
+        &(unsafe { owner.as_ref().map(|_| CStr::from_ptr(owner)) })
+            .map(|owner| owner.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    );
     let event = match event {
         0 => platform::BrowserUnderlayHotkey::Toggle,
         1 => platform::BrowserUnderlayHotkey::HoldStart,
@@ -590,23 +644,30 @@ extern "C" fn browser_hotkey_trampoline(_ctx: *mut c_void, window: *mut NSWindow
         }
         Ivar::get_state(wrapper_ptr).clone()
     };
-    dispatch_browser_hotkey(window_state, event);
+    dispatch_browser_hotkey(window_state, owner, event);
 }
 
 /// Mirrors `dispatch_window_resized`'s borrow discipline: hotkey events arrive
 /// from a local event monitor during AppKit event dispatch, which can already
 /// hold the app borrow, so defer to the foreground executor when it does.
-fn dispatch_browser_hotkey(window_state: Rc<WindowState>, event: platform::BrowserUnderlayHotkey) {
+fn dispatch_browser_hotkey(
+    window_state: Rc<WindowState>,
+    owner: platform::BrowserUnderlayOwner,
+    event: platform::BrowserUnderlayHotkey,
+) {
     if app::callback_dispatcher().can_borrow_mut() {
-        app::callback_dispatcher().browser_underlay_hotkey(window_state.window_id, event);
+        app::callback_dispatcher().browser_underlay_hotkey(window_state.window_id, owner, event);
     } else {
         let weak_window_state = Rc::downgrade(&window_state);
         window_state
             .executor
             .spawn(async move {
                 if let Some(window_state) = weak_window_state.upgrade() {
-                    app::callback_dispatcher()
-                        .browser_underlay_hotkey(window_state.window_id, event);
+                    app::callback_dispatcher().browser_underlay_hotkey(
+                        window_state.window_id,
+                        owner,
+                        event,
+                    );
                 }
             })
             .detach();
@@ -1021,7 +1082,11 @@ impl Window {
     /// Attaches a browser underlay to the window (behind the Metal surface)
     /// and starts loading `url`. Returns false if the window cannot host an
     /// underlay (e.g. it is a panel) or was not found.
-    pub fn attach_background_webview(window_id: WindowId, url: &str) -> bool {
+    pub fn attach_background_webview(
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+        url: &str,
+    ) -> bool {
         // The hotkey monitor is app-wide; register its callback once, before
         // the first underlay exists that could produce gestures.
         static HOTKEY_CALLBACK: std::sync::Once = std::sync::Once::new();
@@ -1033,24 +1098,32 @@ impl Window {
             }
         });
 
-        let Ok(url) = CString::new(url) else {
+        let (Ok(owner), Ok(url)) = (CString::new(owner.key()), CString::new(url)) else {
             return false;
         };
         // SAFETY: `find_window_with_id` / `browser_underlay_attach` are FFI calls.
         unsafe {
             match Self::find_window_with_id(window_id) {
-                Some(window) => browser_underlay_attach(&window, url.as_ptr()).as_bool(),
+                Some(window) => {
+                    browser_underlay_attach(&window, owner.as_ptr(), url.as_ptr()).as_bool()
+                }
                 None => false,
             }
         }
     }
 
-    /// Returns whether the window currently has a browser underlay attached.
-    pub fn background_webview_attached(window_id: WindowId) -> bool {
+    /// Returns whether the window currently has the `owner` underlay attached.
+    pub fn background_webview_attached(
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+    ) -> bool {
+        let Ok(owner) = CString::new(owner.key()) else {
+            return false;
+        };
         // SAFETY: `find_window_with_id` / `browser_underlay_for_window` are FFI calls.
         unsafe {
             match Self::find_window_with_id(window_id) {
-                Some(window) => !browser_underlay_for_window(&window).is_null(),
+                Some(window) => !browser_underlay_for_window(&window, owner.as_ptr()).is_null(),
                 None => false,
             }
         }
@@ -1058,14 +1131,18 @@ impl Window {
 
     /// Navigates the window's browser underlay to `url`. Noops if no underlay
     /// is attached.
-    pub fn navigate_background_webview(window_id: WindowId, url: &str) {
-        let Ok(url) = CString::new(url) else {
+    pub fn navigate_background_webview(
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+        url: &str,
+    ) {
+        let (Ok(owner), Ok(url)) = (CString::new(owner.key()), CString::new(url)) else {
             return;
         };
         // SAFETY: `find_window_with_id` / `browser_underlay_navigate` are FFI calls.
         unsafe {
             if let Some(window) = Self::find_window_with_id(window_id) {
-                browser_underlay_navigate(&window, url.as_ptr());
+                browser_underlay_navigate(&window, owner.as_ptr(), url.as_ptr());
             }
         }
     }
@@ -1074,29 +1151,47 @@ impl Window {
     /// invoked exactly once, with an error if no underlay is attached.
     pub fn eval_background_webview_js(
         window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
         js: &str,
         callback: BrowserJsEvalCallback,
     ) {
-        let (Some(window), Ok(js)) =
+        let (Some(window), Ok(owner), Ok(js)) = (
             // SAFETY: `find_window_with_id` is an FFI call.
-            (unsafe { Self::find_window_with_id(window_id) }, CString::new(js))
-        else {
-            callback(Err("window not found or invalid JavaScript string".to_owned()));
+            unsafe { Self::find_window_with_id(window_id) },
+            CString::new(owner.key()),
+            CString::new(js),
+        ) else {
+            callback(Err(
+                "window not found or invalid JavaScript string".to_owned()
+            ));
             return;
         };
         let ctx = Box::into_raw(Box::new(callback)) as *mut c_void;
         // SAFETY: `browser_underlay_eval` consumes the callback box through the
         // trampoline exactly once.
         unsafe {
-            browser_underlay_eval(&window, js.as_ptr(), ctx, browser_eval_trampoline);
+            browser_underlay_eval(
+                &window,
+                owner.as_ptr(),
+                js.as_ptr(),
+                ctx,
+                browser_eval_trampoline,
+            );
         }
     }
 
     /// Captures a PNG snapshot of the window's browser underlay. The callback
     /// is always invoked exactly once, with an error if no underlay is attached.
-    pub fn snapshot_background_webview(window_id: WindowId, callback: BrowserSnapshotCallback) {
-        // SAFETY: `find_window_with_id` is an FFI call.
-        let Some(window) = (unsafe { Self::find_window_with_id(window_id) }) else {
+    pub fn snapshot_background_webview(
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+        callback: BrowserSnapshotCallback,
+    ) {
+        let (Some(window), Ok(owner)) = (
+            // SAFETY: `find_window_with_id` is an FFI call.
+            unsafe { Self::find_window_with_id(window_id) },
+            CString::new(owner.key()),
+        ) else {
             callback(Err("window not found".to_owned()));
             return;
         };
@@ -1104,26 +1199,53 @@ impl Window {
         // SAFETY: `browser_underlay_snapshot` consumes the callback box through
         // the trampoline exactly once.
         unsafe {
-            browser_underlay_snapshot(&window, ctx, browser_snapshot_trampoline);
+            browser_underlay_snapshot(&window, owner.as_ptr(), ctx, browser_snapshot_trampoline);
         }
     }
 
-    /// Toggles whether mouse/keyboard events reach the browser underlay.
-    pub fn set_background_webview_interactive(window_id: WindowId, interactive: bool) {
+    /// Toggles whether mouse/keyboard events reach the `owner` underlay.
+    pub fn set_background_webview_interactive(
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+        interactive: bool,
+    ) {
+        let Ok(owner) = CString::new(owner.key()) else {
+            return;
+        };
         // SAFETY: `find_window_with_id` / `browser_underlay_set_interactive` are FFI calls.
         unsafe {
             if let Some(window) = Self::find_window_with_id(window_id) {
-                browser_underlay_set_interactive(&window, Bool::new(interactive));
+                browser_underlay_set_interactive(&window, owner.as_ptr(), Bool::new(interactive));
             }
         }
     }
 
-    /// Removes the window's browser underlay, stopping any media playback.
-    pub fn detach_background_webview(window_id: WindowId) {
+    /// Shows or hides the `owner` underlay.
+    pub fn set_background_webview_visible(
+        window_id: WindowId,
+        owner: &platform::BrowserUnderlayOwner,
+        visible: bool,
+    ) {
+        let Ok(owner) = CString::new(owner.key()) else {
+            return;
+        };
+        // SAFETY: `find_window_with_id` / `browser_underlay_set_visible` are FFI calls.
+        unsafe {
+            if let Some(window) = Self::find_window_with_id(window_id) {
+                browser_underlay_set_visible(&window, owner.as_ptr(), Bool::new(visible));
+            }
+        }
+    }
+
+    /// Removes the window's `owner` underlay, stopping any media playback.
+    pub fn detach_background_webview(window_id: WindowId, owner: &platform::BrowserUnderlayOwner) {
+        let Ok(owner) = CString::new(owner.key()) else {
+            return;
+        };
         // SAFETY: `find_window_with_id` / `browser_underlay_detach` are FFI calls.
         unsafe {
             if let Some(window) = Self::find_window_with_id(window_id) {
-                browser_underlay_detach(&window);
+                browser_underlay_detach(&window, owner.as_ptr());
             }
         }
     }

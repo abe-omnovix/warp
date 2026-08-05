@@ -1,11 +1,11 @@
 //! Target resolution and parameter validation for retained local-control actions.
 use ::local_control::protocol::{
     ActionNameParams, ActionParameterSpec, BindingNameParams, BooleanValueParams,
-    BrowserAttachParams, ColorValueParams, DirectionParams, EmptyParams, FileOpenParams,
-    JavascriptParams, KeyParams, KeyValueParams, NamespaceParams, PageQueryParams, PaneGlassParams,
-    PaneTarget, QueryParams, RenameParams, ResizeParams, SessionTarget, TabActivateParams,
-    TabCloseParams, TabCreateParams, TabTarget, TargetSelector, TextParams, ThemeNameParams,
-    UrlParams, WindowTarget,
+    BrowserAttachParams, BrowserInteractiveParams, BrowserTargetParams, ColorValueParams,
+    DirectionParams, EmptyParams, FileOpenParams, JavascriptParams, KeyParams, KeyValueParams,
+    NamespaceParams, PageQueryParams, PaneGlassParams, PaneTarget, QueryParams, RenameParams,
+    ResizeParams, SessionTarget, TabActivateParams, TabCloseParams, TabCreateParams, TabTarget,
+    TargetSelector, TextParams, ThemeNameParams, UrlParams, WindowTarget,
 };
 use ::local_control::{ActionKind, ControlError, ErrorCode, TargetScope};
 use warpui::{AppContext, ModelContext, TypedActionView, ViewHandle, WindowId};
@@ -38,6 +38,8 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
         ActionParameterSpec::BindingName => parse_params::<BindingNameParams>(action),
         ActionParameterSpec::BooleanValue => parse_params::<BooleanValueParams>(action),
         ActionParameterSpec::BrowserAttach => parse_params::<BrowserAttachParams>(action),
+        ActionParameterSpec::BrowserInteractive => parse_params::<BrowserInteractiveParams>(action),
+        ActionParameterSpec::BrowserTarget => parse_params::<BrowserTargetParams>(action),
         ActionParameterSpec::ColorValue => parse_params::<ColorValueParams>(action),
         ActionParameterSpec::Direction => parse_params::<DirectionParams>(action),
         ActionParameterSpec::FileOpen => parse_params::<FileOpenParams>(action),

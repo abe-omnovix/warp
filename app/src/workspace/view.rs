@@ -5463,6 +5463,10 @@ impl Workspace {
         self.notify_terminal_focus_change(focused_terminal_view_id, ambient_agent_task_id, ctx);
 
         self.update_active_session(ctx);
+
+        // Agent browser underlays are visible only while their pane's tab is
+        // frontmost; every tab-activation path funnels through here.
+        crate::browser_underlay::sync_agent_visibility(ctx);
     }
 
     fn update_window_title(&self, ctx: &mut ViewContext<Self>) {
@@ -27601,12 +27605,9 @@ impl View for Workspace {
             // instead of the terminal), an accent border makes the mode
             // switch visible. The singleton is absent in harnesses that skip
             // full app init.
-            _ if app.has_singleton_model::<BrowserUnderlayState>()
-                && BrowserUnderlayState::as_ref(app).is_attached(self.window_id) =>
-            {
-                let interactive = BrowserUnderlayState::as_ref(app)
-                    .attached(self.window_id)
-                    .is_some_and(|underlay| underlay.effective_interactive());
+            _ if crate::browser_underlay::visible_underlay(self.window_id, app).is_some() => {
+                let interactive =
+                    crate::browser_underlay::effective_interactive(self.window_id, app);
                 if interactive {
                     stack.add_child(
                         workspace
@@ -27834,6 +27835,10 @@ impl View for Workspace {
         WorkspaceRegistry::handle(ctx).update(ctx, |registry, _| {
             registry.unregister(window_id);
         });
+
+        // Drop underlay state for this window (its platform webviews die
+        // with the window).
+        crate::browser_underlay::window_closed(window_id, ctx);
 
         // If this workspace's close was registered as part of a tab-drag
         // handoff, clear the entry now that the workspace is gone from the

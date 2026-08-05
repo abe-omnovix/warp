@@ -5486,6 +5486,8 @@ impl PaneGroup {
         // Drop any transitive-share tracking entry for this pane so the
         // map doesn't accumulate stale ids.
         self.forget_transitively_shared_pane(pane_id);
+        // Tear down the pane's agent browser underlay, if it had one.
+        crate::browser_underlay::pane_closed(pane_id, ctx);
 
         ctx.notify();
         ctx.emit(Event::TerminalViewStateChanged);
@@ -5991,6 +5993,8 @@ impl PaneGroup {
         ModelHandle<Box<dyn TerminalManager>>,
     ) {
         add_session_focus_env_vars(&mut env_vars, terminal_session_uuid);
+        #[cfg(feature = "local_fs")]
+        crate::local_control::add_mcp_env_vars(&mut env_vars, ctx);
 
         cfg_if::cfg_if! {
             if #[cfg(feature = "remote_tty")] {

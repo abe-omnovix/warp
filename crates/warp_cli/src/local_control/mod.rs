@@ -380,11 +380,28 @@ pub enum BrowserCommand {
     /// Toggle whether input events reach the browser underlay.
     Interactive(BrowserInteractiveArgs),
 
-    /// Show the browser underlay state for a window.
-    Status(TargetArgs),
+    /// Show the state of a browser underlay.
+    Status(BrowserRouteArgs),
 
-    /// Detach the browser underlay from a window.
-    Detach(TargetArgs),
+    /// Detach a browser underlay.
+    Detach(BrowserRouteArgs),
+}
+
+/// Routing flags shared by all `browser` subcommands: the window's ambience
+/// underlay, or an agent underlay keyed by its pane's session UUID.
+#[derive(Debug, Clone, Args)]
+pub struct BrowserRouteArgs {
+    /// Target the window's user-owned ambience underlay.
+    #[arg(long = "ambience", conflicts_with = "pane_session_uuid")]
+    pub ambience: bool,
+
+    /// Terminal session UUID (hex) of the agent underlay's owning pane.
+    /// Defaults to the pane resolved from the target selector.
+    #[arg(long = "pane-session-uuid")]
+    pub pane_session_uuid: Option<String>,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -392,16 +409,16 @@ pub struct BrowserAttachArgs {
     /// URL to load in the underlay.
     pub url: String,
 
-    /// Do not turn the targeted pane to night glass.
+    /// Do not turn the owning pane to night glass (agent underlays only).
     #[arg(long = "no-glass")]
     pub no_glass: bool,
 
-    /// Glass fill opacity override (0-100) for the window.
+    /// Glass fill opacity override (0-100).
     #[arg(long = "glass-opacity")]
     pub glass_opacity: Option<u8>,
 
     #[command(flatten)]
-    pub target: TargetArgs,
+    pub route: BrowserRouteArgs,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -410,7 +427,7 @@ pub struct BrowserUrlArgs {
     pub url: String,
 
     #[command(flatten)]
-    pub target: TargetArgs,
+    pub route: BrowserRouteArgs,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -419,7 +436,7 @@ pub struct BrowserEvalArgs {
     pub javascript: String,
 
     #[command(flatten)]
-    pub target: TargetArgs,
+    pub route: BrowserRouteArgs,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -429,7 +446,7 @@ pub struct BrowserScreenshotArgs {
     pub output: Option<std::path::PathBuf>,
 
     #[command(flatten)]
-    pub target: TargetArgs,
+    pub route: BrowserRouteArgs,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -439,18 +456,22 @@ pub struct BrowserInteractiveArgs {
     pub enabled: bool,
 
     #[command(flatten)]
-    pub target: TargetArgs,
+    pub route: BrowserRouteArgs,
 }
 
 #[derive(Debug, Clone, Args)]
 pub struct PaneGlassArgs {
-    /// Whether the pane renders as night glass.
+    /// Whether the pane renders as a night-glass porthole.
     #[arg(action = clap::ArgAction::Set)]
     pub enabled: bool,
 
-    /// Glass fill opacity override (0-100) for the pane's window.
+    /// Glass fill opacity override (0-100).
     #[arg(long = "opacity")]
     pub opacity: Option<u8>,
+
+    /// Terminal session UUID (hex) of the owning pane.
+    #[arg(long = "pane-session-uuid")]
+    pub pane_session_uuid: Option<String>,
 
     #[command(flatten)]
     pub target: TargetArgs,

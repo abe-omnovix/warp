@@ -247,6 +247,7 @@ fn duplicate_server_start_is_rejected() {
             _runtime: Some(runtime),
             control_endpoint: None,
             registered_instance: None,
+            mcp_env: None,
         });
 
         let err = server
@@ -496,6 +497,7 @@ fn disabling_scripting_invalidates_existing_grant_and_prevents_new_grants() {
                 instance_id: instance_id.clone(),
                 expected_host: expected_host.clone(),
                 credentials: Default::default(),
+                mcp_token: ::local_control::AuthToken::generate(),
             }
         });
         let credential = issue_credential(&state, CredentialRequest::new(ActionKind::AppPing))

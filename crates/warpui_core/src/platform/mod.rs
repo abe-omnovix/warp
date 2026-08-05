@@ -549,6 +549,37 @@ pub enum WindowFocusBehavior {
     RetainZIndex,
 }
 
+/// Identity of a background webview within a window. A window hosts at most
+/// one ambience underlay (user-owned, always at the very back) plus any
+/// number of agent-owned underlays keyed by their pane; the application
+/// controls which one is visible.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum BrowserUnderlayOwner {
+    /// The user-owned ambience underlay.
+    Ambience,
+    /// An agent-owned underlay, keyed by the owning pane's terminal session
+    /// UUID (hex).
+    Agent(String),
+}
+
+impl BrowserUnderlayOwner {
+    /// The wire key used by the platform layer ("" = ambience).
+    pub fn key(&self) -> &str {
+        match self {
+            Self::Ambience => "",
+            Self::Agent(key) => key,
+        }
+    }
+
+    pub fn from_key(key: &str) -> Self {
+        if key.is_empty() {
+            Self::Ambience
+        } else {
+            Self::Agent(key.to_owned())
+        }
+    }
+}
+
 /// Callback invoked (on the main thread, exactly once) with the result of a
 /// background-webview JavaScript evaluation.
 pub type BrowserJsEvalCallback = Box<dyn FnOnce(Result<String, String>) + 'static>;
@@ -618,23 +649,39 @@ pub trait WindowManager {
     /// starts loading `url`. Returns false when the window was not found or
     /// the platform does not support background webviews (currently all
     /// platforms but macOS, where the default no-op is overridden).
-    fn attach_background_webview(&self, _window_id: WindowId, _url: &str) -> bool {
+    fn attach_background_webview(
+        &self,
+        _window_id: WindowId,
+        _owner: &BrowserUnderlayOwner,
+        _url: &str,
+    ) -> bool {
         false
     }
 
-    /// Returns whether the window currently has a background webview attached.
-    fn background_webview_attached(&self, _window_id: WindowId) -> bool {
+    /// Returns whether the window currently has the `owner` webview attached.
+    fn background_webview_attached(
+        &self,
+        _window_id: WindowId,
+        _owner: &BrowserUnderlayOwner,
+    ) -> bool {
         false
     }
 
-    /// Navigates the window's background webview to `url`, if one is attached.
-    fn navigate_background_webview(&self, _window_id: WindowId, _url: &str) {}
+    /// Navigates the window's `owner` webview to `url`, if attached.
+    fn navigate_background_webview(
+        &self,
+        _window_id: WindowId,
+        _owner: &BrowserUnderlayOwner,
+        _url: &str,
+    ) {
+    }
 
-    /// Evaluates `js` in the window's background webview. The callback is
+    /// Evaluates `js` in the window's `owner` webview. The callback is
     /// always invoked exactly once, on the main thread.
     fn eval_background_webview_js(
         &self,
         _window_id: WindowId,
+        _owner: &BrowserUnderlayOwner,
         _js: &str,
         callback: BrowserJsEvalCallback,
     ) {
@@ -643,19 +690,40 @@ pub trait WindowManager {
         ));
     }
 
-    /// Captures a PNG snapshot of the window's background webview. The
+    /// Captures a PNG snapshot of the window's `owner` webview. The
     /// callback is always invoked exactly once, on the main thread.
-    fn snapshot_background_webview(&self, _window_id: WindowId, callback: BrowserSnapshotCallback) {
+    fn snapshot_background_webview(
+        &self,
+        _window_id: WindowId,
+        _owner: &BrowserUnderlayOwner,
+        callback: BrowserSnapshotCallback,
+    ) {
         callback(Err(
             "background webviews are not supported on this platform".to_owned(),
         ));
     }
 
-    /// Toggles whether input events reach the window's background webview.
-    fn set_background_webview_interactive(&self, _window_id: WindowId, _interactive: bool) {}
+    /// Toggles whether input events reach the window's `owner` webview.
+    fn set_background_webview_interactive(
+        &self,
+        _window_id: WindowId,
+        _owner: &BrowserUnderlayOwner,
+        _interactive: bool,
+    ) {
+    }
 
-    /// Removes the window's background webview, stopping any media playback.
-    fn detach_background_webview(&self, _window_id: WindowId) {}
+    /// Shows or hides the window's `owner` webview. Hiding an interactive
+    /// webview also clears its interactive state.
+    fn set_background_webview_visible(
+        &self,
+        _window_id: WindowId,
+        _owner: &BrowserUnderlayOwner,
+        _visible: bool,
+    ) {
+    }
+
+    /// Removes the window's `owner` webview, stopping any media playback.
+    fn detach_background_webview(&self, _window_id: WindowId, _owner: &BrowserUnderlayOwner) {}
 
     /// Sets the background blur radius for all windows to the given `blur_radius_pixels` value.
     fn set_all_windows_background_blur_radius(&self, blur_radius_pixels: u8);

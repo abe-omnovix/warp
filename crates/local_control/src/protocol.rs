@@ -82,18 +82,50 @@ pub struct BooleanValueParams {
 #[serde(deny_unknown_fields)]
 pub struct BrowserAttachParams {
     pub url: String,
-    /// Whether the targeted pane turns to night glass so the page is visible
-    /// behind it (default true).
+    /// Whether the owning pane renders as a night-glass porthole so the page
+    /// is visible behind it (default true). Agent underlays only.
     #[serde(default = "default_true")]
     pub glass: bool,
-    /// Glass fill opacity override (0-100) for the window; defaults to the
-    /// user's `glass_opacity` setting.
+    /// Glass fill opacity override (0-100); defaults to the user's
+    /// `glass_opacity` setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub glass_opacity: Option<u8>,
+    /// Target the window's user-owned ambience underlay instead of an
+    /// agent underlay. Human/CLI use only; the MCP surface never sets this.
+    #[serde(default)]
+    pub ambience: bool,
+    /// Terminal session UUID (hex) of the owning pane for agent underlays.
+    /// Defaults to the pane resolved from the target selector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_session_uuid: Option<String>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+/// Routing parameters shared by `browser.*` actions that take no other input
+/// (screenshot, status, detach).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserTargetParams {
+    /// Target the window's user-owned ambience underlay.
+    #[serde(default)]
+    pub ambience: bool,
+    /// Terminal session UUID (hex) of the owning pane for agent underlays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_session_uuid: Option<String>,
+}
+
+/// Parameters for `browser.interactive`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserInteractiveParams {
+    pub value: bool,
+    #[serde(default)]
+    pub ambience: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_session_uuid: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +158,10 @@ pub struct FileOpenParams {
 #[serde(deny_unknown_fields)]
 pub struct JavascriptParams {
     pub javascript: String,
+    #[serde(default)]
+    pub ambience: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_session_uuid: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,10 +198,14 @@ pub struct PageQueryParams {
 #[serde(deny_unknown_fields)]
 pub struct PaneGlassParams {
     pub enabled: bool,
-    /// Glass fill opacity override (0-100) for the pane's window; defaults to
-    /// the user's `glass_opacity` setting.
+    /// Glass fill opacity override (0-100); defaults to the user's
+    /// `glass_opacity` setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<u8>,
+    /// Terminal session UUID (hex) of the owning pane. Defaults to the pane
+    /// resolved from the target selector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_session_uuid: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,6 +266,10 @@ pub struct ThemeNameParams {
 #[serde(deny_unknown_fields)]
 pub struct UrlParams {
     pub url: String,
+    #[serde(default)]
+    pub ambience: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_session_uuid: Option<String>,
 }
 
 pub type KeybindingGetParams = BindingNameParams;

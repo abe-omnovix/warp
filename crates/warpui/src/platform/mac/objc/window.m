@@ -469,7 +469,7 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
             // normal hit-testing (the host view is hit-dead); forcing these
             // events to the host view would strand the page's mouse-up, so
             // DOM clicks (down+up on the same element) could never complete.
-            WarpBrowserUnderlayView *underlay = browser_underlay_for_window(self);
+            WarpBrowserUnderlayView *underlay = browser_underlay_visible_for_window(self);
             if (underlay != nil && underlay.interactive) {
                 _leftMouseDownStartedInNativeWindowChrome = NO;
                 [super sendEvent:event];
@@ -488,7 +488,7 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
             break;
         }
         case NSEventTypeLeftMouseDragged: {
-            WarpBrowserUnderlayView *underlay = browser_underlay_for_window(self);
+            WarpBrowserUnderlayView *underlay = browser_underlay_visible_for_window(self);
             if (underlay != nil && underlay.interactive) {
                 [super sendEvent:event];
                 break;
@@ -510,7 +510,7 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
         // locally, though it is unclear why. This breaks the right-click context menu for tabs on
         // local builds, so we propagate the RightMouseDown event manually.
         case NSEventTypeRightMouseDown: {
-            WarpBrowserUnderlayView *underlay = browser_underlay_for_window(self);
+            WarpBrowserUnderlayView *underlay = browser_underlay_visible_for_window(self);
             if (underlay != nil && underlay.interactive) {
                 [super sendEvent:event];
                 break;
@@ -545,7 +545,7 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
     // through the default path, and the F18/Cmd+Esc gestures are recognized
     // by the app-local event monitor before this method runs.
     {
-        WarpBrowserUnderlayView *underlay = browser_underlay_for_window(self);
+        WarpBrowserUnderlayView *underlay = browser_underlay_visible_for_window(self);
         if (underlay != nil && underlay.interactive) {
             return [super performKeyEquivalent:event];
         }

@@ -15469,20 +15469,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "warp_browser_mcp"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "clap",
- "local_control",
- "rmcp",
- "serde",
- "serde_json",
- "tokio",
- "warp_core",
-]
-
-[[package]]
 name = "warp_channel_config"
 version = "0.0.0"
 dependencies = [

@@ -11,6 +11,25 @@
 3. Local-control transport auth (existing, unchanged): owner-only discovery
    record → Unix-socket credential broker with kernel peer-UID check →
    loopback HTTP with short-lived, action-scoped bearer tokens.
+4. `/mcp` endpoint auth (Phase 6): loopback-only bind → browser `Origin`
+   rejection → per-launch bearer token (`WARP_MCP_TOKEN`, generated from
+   OS CSPRNG at server start, never persisted, distributed only through
+   pane-shell environment). Requests then pass gate 2 exactly like
+   warpctrl requests — the token authenticates the caller, it does not
+   bypass permissions.
+
+## Agent isolation (Phase 6)
+
+- Every MCP tool call is **pane-keyed** (explicit `pane` argument or
+  `X-Warp-Pane` header). There is no active-pane fallback, so an agent
+  cannot affect whatever tab the operator happens to be looking at.
+- The **ambience underlay is unreachable from the MCP endpoint**: the
+  `ambience: true` routing flag exists only on the warpctrl/control-plane
+  surface, and the endpoint never sets it. An agent cannot navigate,
+  evaluate JS in, screenshot, or detach the user's default background.
+- Agent browsers are visible only while their pane's tab is frontmost;
+  hiding one also revokes its interactive state, so a backgrounded agent
+  page can never receive operator input.
 
 ## Threat notes
 

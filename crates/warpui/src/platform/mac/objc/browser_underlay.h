@@ -4,11 +4,23 @@
 /// A WKWebView composited *behind* the Metal host view as an ambient window
 /// background (e.g. a muted video stream, or a browser an agent is driving).
 ///
-/// Inert by default: it never participates in hit testing or the responder
-/// chain, so terminal input is unaffected. Setting `interactive` to YES lets
-/// mouse and keyboard events reach the web content until it is reset.
+/// A window can host several underlays, distinguished by `owner`:
+/// - the empty string: the window's ambience underlay (user-owned, always at
+///   the very back);
+/// - anything else: an agent-owned underlay keyed by the agent's pane (in
+///   front of the ambience, behind the Metal surface). At most one underlay
+///   is unhidden at a time above the ambience; the application drives
+///   visibility so an agent underlay only shows while its pane's tab is
+///   frontmost.
+///
+/// Inert by default: underlays never participate in hit testing or the
+/// responder chain, so terminal input is unaffected. Setting `interactive` to
+/// YES lets mouse and keyboard events reach the *visible* underlay until it
+/// is reset.
 @interface WarpBrowserUnderlayView : WKWebView
 @property(nonatomic, assign) BOOL interactive;
+/// Identity of this underlay within its window ("" = ambience).
+@property(nonatomic, copy) NSString *owner;
 @end
 
 /// Callback receiving a JavaScript evaluation result. Exactly one of `result`
@@ -25,43 +37,57 @@ typedef void (*BrowserUnderlayDataCallback)(void *ctx, const uint8_t *bytes, siz
 /// Interactive-mode hotkey gestures. Values match the Rust-side
 /// `BrowserUnderlayHotkey` enum in `warpui_core::platform`.
 typedef enum {
-    BrowserUnderlayHotkeyToggle = 0,    // toggle chord (Cmd+Shift+B)
-    BrowserUnderlayHotkeyHoldStart = 1, // hold modifier (Globe/Fn) engaged
-    BrowserUnderlayHotkeyHoldEnd = 2,   // hold modifier released
+    BrowserUnderlayHotkeyToggle = 0,    // toggle chord (tap CapsLock-as-F18)
+    BrowserUnderlayHotkeyHoldStart = 1, // hold key engaged
+    BrowserUnderlayHotkeyHoldEnd = 2,   // hold key released
     BrowserUnderlayHotkeyForceOff = 3,  // escape chord (Cmd+Esc)
 } BrowserUnderlayHotkeyEvent;
 
 /// Callback invoked on the main thread when an interactive-mode hotkey fires
-/// for a window with an attached underlay.
-typedef void (*BrowserUnderlayHotkeyCallback)(void *ctx, NSWindow *window, int event);
+/// for a window's visible underlay. `owner` identifies that underlay ("" =
+/// ambience) and is only valid for the duration of the call.
+typedef void (*BrowserUnderlayHotkeyCallback)(void *ctx, NSWindow *window, const char *owner,
+                                              int event);
 
-// All functions must be called on the main thread. Functions taking a window
-// no-op (or report an error through their callback) when the window has no
-// underlay attached.
+// All functions must be called on the main thread. `owner` is the underlay
+// identity within the window; NULL and "" both select the ambience underlay.
+// Functions taking a window no-op (or report an error through their callback)
+// when the window has no underlay with that owner.
 
-/// Attaches an underlay to `window` behind its Metal host view, creating it if
-/// needed, and starts loading `url`. Returns NO if the window's view hierarchy
-/// cannot host an underlay (e.g. panels, whose content view is the host view).
-BOOL browser_underlay_attach(NSWindow *window, const char *url);
+/// Attaches the `owner` underlay to `window` behind its Metal host view,
+/// creating it if needed, and starts loading `url`. Agent underlays are
+/// created hidden; the application unhides them via
+/// `browser_underlay_set_visible` when their pane's tab is frontmost.
+/// Returns NO if the window's view hierarchy cannot host an underlay
+/// (e.g. panels, whose content view is the host view).
+BOOL browser_underlay_attach(NSWindow *window, const char *owner, const char *url);
 
-/// Returns the underlay attached to `window`, or nil.
-WarpBrowserUnderlayView *browser_underlay_for_window(NSWindow *window);
+/// Returns the `owner` underlay attached to `window`, or nil.
+WarpBrowserUnderlayView *browser_underlay_for_window(NSWindow *window, const char *owner);
 
-void browser_underlay_navigate(NSWindow *window, const char *url);
+/// Returns the frontmost unhidden underlay of `window`, or nil. This is the
+/// underlay the user sees (and the one interactive mode applies to).
+WarpBrowserUnderlayView *browser_underlay_visible_for_window(NSWindow *window);
 
-void browser_underlay_eval(NSWindow *window, const char *js, void *ctx,
+void browser_underlay_navigate(NSWindow *window, const char *owner, const char *url);
+
+void browser_underlay_eval(NSWindow *window, const char *owner, const char *js, void *ctx,
                            BrowserUnderlayStringCallback callback);
 
-void browser_underlay_snapshot(NSWindow *window, void *ctx,
+void browser_underlay_snapshot(NSWindow *window, const char *owner, void *ctx,
                                BrowserUnderlayDataCallback callback);
 
-void browser_underlay_set_interactive(NSWindow *window, BOOL interactive);
+void browser_underlay_set_interactive(NSWindow *window, const char *owner, BOOL interactive);
 
-void browser_underlay_detach(NSWindow *window);
+/// Shows or hides the `owner` underlay. Hiding an interactive underlay also
+/// clears its interactive state and returns key focus to the host view.
+void browser_underlay_set_visible(NSWindow *window, const char *owner, BOOL visible);
+
+void browser_underlay_detach(NSWindow *window, const char *owner);
 
 /// Registers the process-wide interactive-mode hotkey callback (replacing any
 /// previous registration) and installs an app-local event monitor. The monitor
-/// only reacts to events in windows that have an underlay attached; hotkey
+/// only reacts to events in windows that have a visible underlay; hotkey
 /// events are delivered through `callback` rather than acted on directly so
 /// the application stays the single owner of interactive-mode state.
 void browser_underlay_set_hotkey_callback(void *ctx, BrowserUnderlayHotkeyCallback callback);

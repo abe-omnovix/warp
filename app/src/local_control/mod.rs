@@ -59,6 +59,7 @@
 //! endpoint metadata and credential broker references while Scripting is enabled.
 mod bridge;
 mod handlers;
+mod mcp_endpoint;
 mod permissions;
 mod resolver;
 
@@ -115,6 +116,9 @@ struct ControlServerState {
     instance_id: InstanceId,
     expected_host: String,
     credentials: Arc<Mutex<HashMap<String, CredentialGrant>>>,
+    /// Per-launch bearer secret for the `/mcp` endpoint, injected into pane
+    /// shells as `WARP_MCP_TOKEN`. Independent of broker-issued credentials.
+    mcp_token: AuthToken,
 }
 /// Process-local publisher, credential broker, and HTTP server for one Warp instance.
 ///
@@ -125,6 +129,10 @@ pub struct LocalControlServer {
     _runtime: Option<tokio::runtime::Runtime>,
     control_endpoint: Option<ControlEndpoint>,
     registered_instance: Option<RegisteredInstance>,
+    /// `WARP_MCP_URL` / `WARP_MCP_TOKEN` values for new pane shells while the
+    /// server is running (panes opened before it started must be restarted to
+    /// pick them up).
+    mcp_env: Option<(String, AuthToken)>,
 }
 
 impl Entity for LocalControlServer {
@@ -139,6 +147,7 @@ impl LocalControlServer {
             _runtime: None,
             control_endpoint: None,
             registered_instance: None,
+            mcp_env: None,
         };
         if let Err(error) = server.refresh_for_settings(ctx) {
             log::warn!("Failed to refresh local-control server state: {error:#}");
@@ -179,6 +188,7 @@ impl LocalControlServer {
         self.registered_instance = None;
         self.control_endpoint = None;
         self._runtime = None;
+        self.mcp_env = None;
     }
 
     /// Binds both transports and publishes the routing record that connects them.
@@ -250,14 +260,17 @@ impl LocalControlServer {
             drop(runtime_guard);
             listener
         };
+        let mcp_token = AuthToken::generate();
         let state = ControlServerState {
             bridge_spawner,
             instance_id,
             expected_host: format!("{}:{}", control_endpoint.host, control_endpoint.port),
             credentials: Arc::default(),
+            mcp_token: mcp_token.clone(),
         };
         let router = Router::new()
             .route("/v1/control", post(handle_control_request))
+            .route("/mcp", post(mcp_endpoint::handle_mcp_request))
             .with_state(state.clone());
         runtime.spawn(async move {
             if let Err(err) = axum::serve(listener, router).await {
@@ -267,6 +280,13 @@ impl LocalControlServer {
         #[cfg(unix)]
         runtime.spawn(run_credential_broker(broker_listener, state));
         let endpoint_url = control_endpoint.url();
+        self.mcp_env = Some((
+            format!(
+                "http://{}:{}/mcp",
+                control_endpoint.host, control_endpoint.port
+            ),
+            mcp_token,
+        ));
         self._runtime = Some(runtime);
         self.control_endpoint = Some(control_endpoint);
         self.registered_instance = Some(registered_instance);
@@ -289,6 +309,28 @@ impl LocalControlServer {
         record.credential_broker = registered_instance.record().credential_broker.clone();
         registered_instance.update(record)
     }
+}
+
+/// Environment variable carrying the Warp-hosted MCP endpoint URL.
+pub(crate) const MCP_URL_ENV: &str = "WARP_MCP_URL";
+/// Environment variable carrying the per-launch `/mcp` bearer token.
+pub(crate) const MCP_TOKEN_ENV: &str = "WARP_MCP_TOKEN";
+
+/// Adds `WARP_MCP_URL` / `WARP_MCP_TOKEN` to a new pane shell's environment
+/// so agents launched inside the pane can reach the Warp-hosted MCP endpoint.
+/// No-op while the local-control server is not running.
+pub(crate) fn add_mcp_env_vars(
+    env_vars: &mut HashMap<std::ffi::OsString, std::ffi::OsString>,
+    ctx: &warpui::AppContext,
+) {
+    if !ctx.has_singleton_model::<LocalControlServer>() {
+        return;
+    }
+    let Some((url, token)) = &LocalControlServer::as_ref(ctx).mcp_env else {
+        return;
+    };
+    env_vars.insert(MCP_URL_ENV.into(), url.clone().into());
+    env_vars.insert(MCP_TOKEN_ENV.into(), token.secret().to_owned().into());
 }
 
 /// Builds routing metadata without embedding any bearer credential or secret.

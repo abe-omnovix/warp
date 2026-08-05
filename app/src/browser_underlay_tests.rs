@@ -1,4 +1,5 @@
 use settings::{PrivatePreferences, PublicPreferences, Setting as _, SettingsManager};
+use warpui::platform::BrowserUnderlayOwner;
 use warpui::{App, AppContext, WindowId};
 use warpui_extras::user_preferences;
 
@@ -24,193 +25,268 @@ fn test_pane_id() -> PaneId {
     PaneId::from(TerminalPaneId::dummy_terminal_pane_id())
 }
 
-fn attach(window_id: WindowId, ctx: &mut AppContext) {
+fn attach_ambience_state(window_id: WindowId, ctx: &mut AppContext) {
     BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-        state.set_attached(window_id, "https://example.com".to_owned(), ctx);
+        state.set_ambience_attached(window_id, "https://ambience.example".to_owned(), ctx);
+    });
+}
+
+fn attach_agent_state(
+    pane_key: &str,
+    pane_id: PaneId,
+    window_id: WindowId,
+    visible: bool,
+    ctx: &mut AppContext,
+) {
+    BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+        state.upsert_agent(
+            pane_key.to_owned(),
+            pane_id,
+            window_id,
+            "https://agent.example".to_owned(),
+            visible,
+            ctx,
+        );
     });
 }
 
 #[test]
-fn set_pane_glass_marks_pane_as_glass() {
+fn ambience_renders_whole_window_glass() {
     App::test((), |mut app| async move {
         app.update(|ctx| {
             init_test_app(ctx);
             let window_id = WindowId::new();
-            let pane_id = test_pane_id();
-            attach(window_id, ctx);
-
-            let applied = BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                state.set_pane_glass(window_id, pane_id, true, None, ctx)
-            });
-
-            assert!(applied);
-            let state = BrowserUnderlayState::as_ref(ctx);
-            assert!(state.is_glass_pane(window_id, pane_id));
-            assert!(state.has_glass_panes(window_id));
-        });
-    });
-}
-
-#[test]
-fn set_pane_glass_is_noop_without_underlay() {
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-            let window_id = WindowId::new();
-            let pane_id = test_pane_id();
-
-            let applied = BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                state.set_pane_glass(window_id, pane_id, true, None, ctx)
-            });
-
-            assert!(!applied);
-            assert!(!BrowserUnderlayState::as_ref(ctx).is_glass_pane(window_id, pane_id));
-        });
-    });
-}
-
-#[test]
-fn disabling_glass_removes_pane_from_glass_set() {
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-            let window_id = WindowId::new();
-            let pane_id = test_pane_id();
-            attach(window_id, ctx);
-            BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                state.set_pane_glass(window_id, pane_id, true, None, ctx);
-            });
-
-            BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                state.set_pane_glass(window_id, pane_id, false, None, ctx);
-            });
-
-            let state = BrowserUnderlayState::as_ref(ctx);
-            assert!(!state.is_glass_pane(window_id, pane_id));
-            assert!(!state.has_glass_panes(window_id));
-        });
-    });
-}
-
-#[test]
-fn detach_clears_glass_state() {
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-            let window_id = WindowId::new();
-            let pane_id = test_pane_id();
-            attach(window_id, ctx);
-            BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                state.set_pane_glass(window_id, pane_id, true, None, ctx);
-            });
-
-            BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                state.set_detached(window_id, ctx);
-            });
-
-            let state = BrowserUnderlayState::as_ref(ctx);
-            assert!(!state.is_attached(window_id));
-            assert!(!state.has_glass_panes(window_id));
-        });
-    });
-}
-
-#[test]
-fn pane_paints_no_background_in_ambience_mode() {
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-            let window_id = WindowId::new();
-            let pane_id = test_pane_id();
-            attach(window_id, ctx);
-
-            assert_eq!(pane_fill_opacity(window_id, pane_id, ctx), None);
-        });
-    });
-}
-
-#[test]
-fn pane_paints_no_background_without_underlay() {
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
+            attach_ambience_state(window_id, ctx);
 
             assert_eq!(
-                pane_fill_opacity(WindowId::new(), test_pane_id(), ctx),
-                None
+                visible_underlay(window_id, ctx),
+                Some(VisibleUnderlay::Ambience)
+            );
+            // 55 is the `glass_opacity` setting default.
+            assert_eq!(workspace_fill_opacity(window_id, ctx), 55);
+            assert_eq!(pane_fill_opacity(window_id, test_pane_id(), ctx), None);
+        });
+    });
+}
+
+#[test]
+fn visible_agent_takes_priority_over_ambience() {
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+            let window_id = WindowId::new();
+            let pane_id = test_pane_id();
+            attach_ambience_state(window_id, ctx);
+            attach_agent_state("abc123", pane_id, window_id, true, ctx);
+
+            assert_eq!(
+                visible_underlay(window_id, ctx),
+                Some(VisibleUnderlay::Agent {
+                    pane_id,
+                    glass: true
+                })
+            );
+            assert_eq!(workspace_fill_opacity(window_id, ctx), 10);
+        });
+    });
+}
+
+#[test]
+fn hidden_agent_falls_back_to_ambience() {
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+            let window_id = WindowId::new();
+            attach_ambience_state(window_id, ctx);
+            attach_agent_state("abc123", test_pane_id(), window_id, false, ctx);
+
+            assert_eq!(
+                visible_underlay(window_id, ctx),
+                Some(VisibleUnderlay::Ambience)
             );
         });
     });
 }
 
 #[test]
-fn glass_pane_uses_glass_opacity_setting() {
+fn agent_pane_is_glass_porthole_and_others_near_opaque() {
     App::test((), |mut app| async move {
         app.update(|ctx| {
             init_test_app(ctx);
             let window_id = WindowId::new();
-            let pane_id = test_pane_id();
-            attach(window_id, ctx);
-            BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                state.set_pane_glass(window_id, pane_id, true, None, ctx);
-            });
-
-            // 55 is the `glass_opacity` setting default.
-            assert_eq!(pane_fill_opacity(window_id, pane_id, ctx), Some(55));
-        });
-    });
-}
-
-#[test]
-fn non_glass_pane_is_near_opaque_while_another_pane_is_glass() {
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-            let window_id = WindowId::new();
-            let glass_pane = test_pane_id();
+            let agent_pane = test_pane_id();
             let other_pane = test_pane_id();
-            attach(window_id, ctx);
-            BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                state.set_pane_glass(window_id, glass_pane, true, None, ctx);
-            });
+            attach_agent_state("abc123", agent_pane, window_id, true, ctx);
 
+            assert_eq!(pane_fill_opacity(window_id, agent_pane, ctx), Some(55));
             assert_eq!(pane_fill_opacity(window_id, other_pane, ctx), Some(95));
         });
     });
 }
 
 #[test]
-fn glass_opacity_override_beats_setting() {
+fn agent_glass_off_renders_whole_tab_glass() {
     App::test((), |mut app| async move {
         app.update(|ctx| {
             init_test_app(ctx);
             let window_id = WindowId::new();
-            let pane_id = test_pane_id();
-            attach(window_id, ctx);
-
+            let agent_pane = test_pane_id();
+            attach_agent_state("abc123", agent_pane, window_id, true, ctx);
             BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                state.set_pane_glass(window_id, pane_id, true, Some(30), ctx);
+                assert!(state.set_agent_glass("abc123", false, None, ctx));
             });
 
-            assert_eq!(pane_fill_opacity(window_id, pane_id, ctx), Some(30));
+            assert_eq!(pane_fill_opacity(window_id, agent_pane, ctx), None);
+            assert_eq!(workspace_fill_opacity(window_id, ctx), 55);
         });
     });
 }
 
 #[test]
-fn glass_opacity_override_clamps_to_max() {
+fn agent_glass_opacity_override_beats_setting() {
     App::test((), |mut app| async move {
         app.update(|ctx| {
             init_test_app(ctx);
             let window_id = WindowId::new();
-            let pane_id = test_pane_id();
-            attach(window_id, ctx);
-
+            let agent_pane = test_pane_id();
+            attach_agent_state("abc123", agent_pane, window_id, true, ctx);
             BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                state.set_pane_glass(window_id, pane_id, true, Some(200), ctx);
+                state.set_agent_glass("abc123", true, Some(30), ctx);
             });
 
-            assert_eq!(pane_fill_opacity(window_id, pane_id, ctx), Some(100));
+            assert_eq!(pane_fill_opacity(window_id, agent_pane, ctx), Some(30));
+        });
+    });
+}
+
+#[test]
+fn eviction_candidate_appears_at_cap() {
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+            let window_id = WindowId::new();
+            for key in ["a1", "a2"] {
+                attach_agent_state(key, test_pane_id(), window_id, false, ctx);
+            }
+            assert_eq!(
+                BrowserUnderlayState::as_ref(ctx).agent_eviction_candidate(window_id),
+                None
+            );
+
+            attach_agent_state("a3", test_pane_id(), window_id, false, ctx);
+
+            // "a1" was attached first, so it is the least recently used.
+            assert_eq!(
+                BrowserUnderlayState::as_ref(ctx).agent_eviction_candidate(window_id),
+                Some("a1".to_owned())
+            );
+        });
+    });
+}
+
+#[test]
+fn forget_window_drops_ambience_and_agents() {
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+            let window_id = WindowId::new();
+            attach_ambience_state(window_id, ctx);
+            attach_agent_state("abc123", test_pane_id(), window_id, true, ctx);
+
+            BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+                state.forget_window(window_id, ctx);
+            });
+
+            assert_eq!(visible_underlay(window_id, ctx), None);
+            assert!(BrowserUnderlayState::as_ref(ctx).agent("abc123").is_none());
+        });
+    });
+}
+
+#[test]
+fn hiding_an_agent_clears_its_interactive_state() {
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+            let window_id = WindowId::new();
+            attach_agent_state("abc123", test_pane_id(), window_id, true, ctx);
+            let owner = BrowserUnderlayOwner::Agent("abc123".to_owned());
+            BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+                state.set_interactive(window_id, &owner, true, ctx);
+            });
+            assert!(effective_interactive(window_id, ctx));
+
+            BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+                state.set_agent_visible("abc123", false, ctx);
+            });
+
+            assert!(!effective_interactive(window_id, ctx));
+        });
+    });
+}
+
+#[test]
+fn toggle_hotkey_flips_latched_interactive_per_owner() {
+    use warpui::platform::BrowserUnderlayHotkey::Toggle;
+
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+            let window_id = WindowId::new();
+            attach_ambience_state(window_id, ctx);
+            let owner = BrowserUnderlayOwner::Ambience;
+
+            let apply = |ctx: &mut AppContext| {
+                BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+                    state.apply_hotkey(window_id, &owner, Toggle, ctx)
+                })
+            };
+            assert_eq!(apply(ctx), Some(true));
+            assert_eq!(apply(ctx), Some(false));
+        });
+    });
+}
+
+#[test]
+fn hold_hotkey_is_momentary_and_latch_survives_release() {
+    use warpui::platform::BrowserUnderlayHotkey::{HoldEnd, HoldStart, Toggle};
+
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+            let window_id = WindowId::new();
+            attach_agent_state("abc123", test_pane_id(), window_id, true, ctx);
+            let owner = BrowserUnderlayOwner::Agent("abc123".to_owned());
+
+            let apply = |event, ctx: &mut AppContext| {
+                BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+                    state.apply_hotkey(window_id, &owner, event, ctx)
+                })
+            };
+            assert_eq!(apply(HoldStart, ctx), Some(true));
+            assert_eq!(apply(Toggle, ctx), Some(true));
+            assert_eq!(apply(HoldEnd, ctx), Some(true));
+        });
+    });
+}
+
+#[test]
+fn hotkeys_are_ignored_without_a_matching_underlay() {
+    use warpui::platform::BrowserUnderlayHotkey::Toggle;
+
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+
+            let result = BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+                state.apply_hotkey(
+                    WindowId::new(),
+                    &BrowserUnderlayOwner::Ambience,
+                    Toggle,
+                    ctx,
+                )
+            });
+            assert_eq!(result, None);
         });
     });
 }
@@ -226,147 +302,6 @@ fn glass_opacity_setting_clamps_to_max() {
             });
 
             assert_eq!(*BrowserUnderlaySettings::as_ref(ctx).glass_opacity, 100);
-        });
-    });
-}
-
-#[test]
-fn workspace_renders_whole_window_glass_without_glass_panes() {
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-            let window_id = WindowId::new();
-            attach(window_id, ctx);
-
-            // 55 is the `glass_opacity` setting default.
-            assert_eq!(workspace_fill_opacity(window_id, ctx), 55);
-        });
-    });
-}
-
-#[test]
-fn workspace_drops_to_faint_tint_while_a_pane_is_glass() {
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-            let window_id = WindowId::new();
-            let pane_id = test_pane_id();
-            attach(window_id, ctx);
-            BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                state.set_pane_glass(window_id, pane_id, true, None, ctx);
-            });
-
-            assert_eq!(workspace_fill_opacity(window_id, ctx), 10);
-        });
-    });
-}
-
-fn apply_hotkey(
-    window_id: WindowId,
-    event: warpui::platform::BrowserUnderlayHotkey,
-    ctx: &mut AppContext,
-) -> Option<bool> {
-    BrowserUnderlayState::handle(ctx)
-        .update(ctx, |state, ctx| state.apply_hotkey(window_id, event, ctx))
-}
-
-#[test]
-fn toggle_hotkey_flips_latched_interactive() {
-    use warpui::platform::BrowserUnderlayHotkey::Toggle;
-
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-            let window_id = WindowId::new();
-            attach(window_id, ctx);
-
-            assert_eq!(apply_hotkey(window_id, Toggle, ctx), Some(true));
-            assert_eq!(apply_hotkey(window_id, Toggle, ctx), Some(false));
-        });
-    });
-}
-
-#[test]
-fn hold_hotkey_is_momentary() {
-    use warpui::platform::BrowserUnderlayHotkey::{HoldEnd, HoldStart};
-
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-            let window_id = WindowId::new();
-            attach(window_id, ctx);
-
-            assert_eq!(apply_hotkey(window_id, HoldStart, ctx), Some(true));
-            assert_eq!(apply_hotkey(window_id, HoldEnd, ctx), Some(false));
-        });
-    });
-}
-
-#[test]
-fn toggle_during_hold_latches_interactive_past_release() {
-    use warpui::platform::BrowserUnderlayHotkey::{HoldEnd, HoldStart, Toggle};
-
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-            let window_id = WindowId::new();
-            attach(window_id, ctx);
-
-            assert_eq!(apply_hotkey(window_id, HoldStart, ctx), Some(true));
-            assert_eq!(apply_hotkey(window_id, Toggle, ctx), Some(true));
-            assert_eq!(apply_hotkey(window_id, HoldEnd, ctx), Some(true));
-        });
-    });
-}
-
-#[test]
-fn force_off_clears_latched_and_hold() {
-    use warpui::platform::BrowserUnderlayHotkey::{ForceOff, HoldStart, Toggle};
-
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-            let window_id = WindowId::new();
-            attach(window_id, ctx);
-            apply_hotkey(window_id, Toggle, ctx);
-            apply_hotkey(window_id, HoldStart, ctx);
-
-            assert_eq!(apply_hotkey(window_id, ForceOff, ctx), Some(false));
-        });
-    });
-}
-
-#[test]
-fn hotkeys_are_ignored_without_an_underlay() {
-    use warpui::platform::BrowserUnderlayHotkey::Toggle;
-
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-
-            assert_eq!(apply_hotkey(WindowId::new(), Toggle, ctx), None);
-        });
-    });
-}
-
-#[test]
-fn latched_off_keeps_effective_interactive_while_held() {
-    use warpui::platform::BrowserUnderlayHotkey::HoldStart;
-
-    App::test((), |mut app| async move {
-        app.update(|ctx| {
-            init_test_app(ctx);
-            let window_id = WindowId::new();
-            attach(window_id, ctx);
-            apply_hotkey(window_id, HoldStart, ctx);
-
-            // Latching off over the control plane while the hold hotkey is
-            // physically held: input keeps flowing until release.
-            let effective = BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                state.set_interactive(window_id, false, ctx)
-            });
-
-            assert_eq!(effective, Some(true));
         });
     });
 }

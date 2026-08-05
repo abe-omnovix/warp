@@ -3,7 +3,7 @@
 The browser underlay renders a live WKWebView *behind* a Warp window's terminal content, with the terminal drawn over it on translucent "night glass". It serves two workflows:
 
 - **Ambience** — a muted video stream (YouTube aquarium, lofi radio, etc.) playing behind the whole window.
-- **Monitorable agent browsing** — an agent attaches a browser to its own pane via the `warp-browser-mcp` MCP server; that pane turns dark glass so the operator can watch exactly what the agent's browser is doing while the agent works.
+- **Monitorable agent browsing** — an agent attaches a browser to its own pane via Warp's built-in MCP endpoint; that pane turns dark glass so the operator can watch exactly what the agent's browser is doing while the agent works. Agent browsers are **pane-isolated**: each lives behind the tab its pane belongs to, is visible only while that tab is frontmost, and can never touch the ambience background.
 
 Everything is gated by `FeatureFlag::BrowserUnderlay` (macOS only) and, for external control, the `allow_browser_control` setting (Settings › Scripting, default off).
 
@@ -55,7 +55,9 @@ hidutil property --set '{"UserKeyMapping":[{"HIDKeyboardModifierMappingSrc":0x70
 hidutil property --set '{"UserKeyMapping":[]}'
 ```
 
-With that in place, in any window with an underlay attached:
+With that in place, in any window with a visible underlay (the gesture
+controls whatever browser is currently composited — an agent's browser in
+its tab, the ambience elsewhere):
 
 - **Tap CapsLock** — toggle interactive mode (input goes to the page until
   toggled back; an accent border marks the mode).
@@ -69,15 +71,24 @@ matters.
 
 ## Quickstart: agent browsing via MCP
 
-Register `warp-browser-mcp` for Claude Code (or any MCP client) — see `MCP.md`. An agent running inside a Warp pane self-binds to that pane via `WARP_TERMINAL_SESSION_UUID` and can then:
+Warp serves the MCP endpoint itself — no extra binary. Every pane shell gets
+`WARP_MCP_URL` and `WARP_MCP_TOKEN` (restart panes opened before Scripting was
+enabled); register the endpoint for Claude Code or any Streamable HTTP MCP
+client — see `MCP.md` for the JSON. An agent running inside a Warp pane binds
+to that pane via the `X-Warp-Pane` header (from `WARP_TERMINAL_SESSION_UUID`)
+and can then:
 
-1. `browser_attach {url}` — browser appears behind its pane, pane goes night glass
+1. `browser_attach {url}` — browser appears behind its pane's tab, pane goes night glass
 2. `browser_eval` / `browser_navigate` / `browser_screenshot` — drive and read the page
-3. `browser_detach` — clean up
+3. `browser_detach` — clean up (also automatic on pane close, after 15 idle minutes, or when a window exceeds 3 agent browsers)
+
+Switching to another tab hides the agent's browser (audio keeps playing);
+switching back shows it again. The ambience underlay is untouchable from the
+endpoint: only `warpctrl --ambience` and the settings field drive it.
 
 ## Files
 
 - `PRODUCT.md` — UX intent and scope decisions
 - `TECH.md` — architecture, compositing model, phases, ADR-style decisions
 - `SECURITY.md` — permission model and threat notes
-- `MCP.md` — `warp-browser-mcp` tool surface and pane binding
+- `MCP.md` — Warp-hosted `/mcp` endpoint, tool surface, and pane binding

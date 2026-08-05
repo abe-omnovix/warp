@@ -127,44 +127,81 @@ impl WindowManager {
             .set_all_windows_background_blur_radius(blur_radius_pixels)
     }
 
-    pub fn attach_background_webview(&self, window_id: WindowId, url: &str) -> bool {
-        self.platform.attach_background_webview(window_id, url)
+    pub fn attach_background_webview(
+        &self,
+        window_id: WindowId,
+        owner: &crate::platform::BrowserUnderlayOwner,
+        url: &str,
+    ) -> bool {
+        self.platform
+            .attach_background_webview(window_id, owner, url)
     }
 
-    pub fn background_webview_attached(&self, window_id: WindowId) -> bool {
-        self.platform.background_webview_attached(window_id)
+    pub fn background_webview_attached(
+        &self,
+        window_id: WindowId,
+        owner: &crate::platform::BrowserUnderlayOwner,
+    ) -> bool {
+        self.platform.background_webview_attached(window_id, owner)
     }
 
-    pub fn navigate_background_webview(&self, window_id: WindowId, url: &str) {
-        self.platform.navigate_background_webview(window_id, url)
+    pub fn navigate_background_webview(
+        &self,
+        window_id: WindowId,
+        owner: &crate::platform::BrowserUnderlayOwner,
+        url: &str,
+    ) {
+        self.platform
+            .navigate_background_webview(window_id, owner, url)
     }
 
     pub fn eval_background_webview_js(
         &self,
         window_id: WindowId,
+        owner: &crate::platform::BrowserUnderlayOwner,
         js: &str,
         callback: crate::platform::BrowserJsEvalCallback,
     ) {
         self.platform
-            .eval_background_webview_js(window_id, js, callback)
+            .eval_background_webview_js(window_id, owner, js, callback)
     }
 
     pub fn snapshot_background_webview(
         &self,
         window_id: WindowId,
+        owner: &crate::platform::BrowserUnderlayOwner,
         callback: crate::platform::BrowserSnapshotCallback,
     ) {
         self.platform
-            .snapshot_background_webview(window_id, callback)
+            .snapshot_background_webview(window_id, owner, callback)
     }
 
-    pub fn set_background_webview_interactive(&self, window_id: WindowId, interactive: bool) {
+    pub fn set_background_webview_interactive(
+        &self,
+        window_id: WindowId,
+        owner: &crate::platform::BrowserUnderlayOwner,
+        interactive: bool,
+    ) {
         self.platform
-            .set_background_webview_interactive(window_id, interactive)
+            .set_background_webview_interactive(window_id, owner, interactive)
     }
 
-    pub fn detach_background_webview(&self, window_id: WindowId) {
-        self.platform.detach_background_webview(window_id)
+    pub fn set_background_webview_visible(
+        &self,
+        window_id: WindowId,
+        owner: &crate::platform::BrowserUnderlayOwner,
+        visible: bool,
+    ) {
+        self.platform
+            .set_background_webview_visible(window_id, owner, visible)
+    }
+
+    pub fn detach_background_webview(
+        &self,
+        window_id: WindowId,
+        owner: &crate::platform::BrowserUnderlayOwner,
+    ) {
+        self.platform.detach_background_webview(window_id, owner)
     }
 
     pub fn set_all_windows_background_blur_texture(&self, use_blur_texture: bool) {
