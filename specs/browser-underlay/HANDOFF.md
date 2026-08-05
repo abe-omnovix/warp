@@ -84,19 +84,19 @@ settled — do not re-litigate.
     YouTube *embeds* refuse to play (error 153 — no referring page); use
     direct pages/WebGL, or later load embeds via a wrapper page with a real
     origin.
-  - Targeted integration batch over the contentView blast radius (18 tests:
-    window lifecycle/cascade, tab↔window drags, focus, input routing):
-    **18/18 pass** after fixing a real regression it caught — window dealloc
-    still read the state ivar off the contentView (now a plain container);
-    fixed to use `warp_host_view_for_window` (commit `31e75a30`).
+  - **Full integration suite: 243/243 pass** (`cargo nextest run -p
+    integration -E 'not test(ssh)'`; the ssh tests dial Warp-internal CI
+    fixtures like `ubuntu-14-04:25784` and cannot run on this machine).
+    The first run caught a real regression — window dealloc still read the
+    state ivar off the contentView (now a plain container), so closing any
+    window panicked; fixed to use `warp_host_view_for_window` (`31e75a30`).
   - Dev-channel binaries (`warp`, `stable` bins) abort at startup without the
     private `warp-channel-config` on PATH — use the `warp-oss` bin (inline
     config) for source-built runs on this machine.
 - Still outstanding: `<video>`-element half of the occlusion spike (needs
   `allow_browser_control` enabled in the OSS build's Settings › Scripting —
   waiting on Abe; then `browser navigate` to a muted autoplay video and
-  `browser eval` that `currentTime` advances), the full 249-test ui suite
-  (only the 18 blast-radius tests were run), and the manual settings-page
+  `browser eval` that `currentTime` advances), and the manual settings-page
   search pass per `gui-settings-ui` "How to verify".
 
 ## Local machine state (for the session running on Abe's Mac)
