@@ -433,8 +433,9 @@ elif [[ $RELEASE_CHANNEL = "oss" ]]; then
     WARP_APP_NAME="WarpOss"
     WARP_SCHEME_NAME="warposs"
     # The OSS channel does not ship Sentry, so drop the cocoa_sentry feature
-    # (which would otherwise pull in the Sentry framework dependency).
-    FEATURES="release_bundle,extern_plist"
+    # (which would otherwise pull in the Sentry framework dependency) while
+    # preserving the base features and any --features additions.
+    FEATURES="$(echo "$FEATURES" | tr ',' '\n' | grep -v '^cocoa_sentry$' | paste -sd, -)"
 fi
 
 OUT_DIR="target/$TARGET_PROFILE_DIR/bundle/osx"
