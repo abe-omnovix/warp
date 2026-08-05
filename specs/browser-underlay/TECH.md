@@ -94,10 +94,21 @@ view geometry mirroring. Per-pane *webviews* are Phase 5.
 4. **`warp-browser-mcp`** — workspace crate; rmcp stdio server linking
    `local_control` client directly. Pane binding order: explicit param →
    `--pane-session-uuid` → `WARP_TERMINAL_SESSION_UUID` env → active pane.
-5. **Later (documented only)** — per-pane webview rects (mirror
+5. **Partially shipped: interactive-mode hotkeys + indicator.** A local
+   NSEvent monitor (installed with the first attach; local monitors see
+   events before the first responder, so the exit gestures work while the
+   webview owns keys) recognizes ⌘⇧B (toggle latched interactive), Globe/Fn
+   held ≥150 ms (momentary interactive while held; the grace period keeps
+   Fn-combos like fn+arrows in the terminal), and ⌘Esc (force off). Gestures
+   flow platform → `AppCallbacks::on_browser_underlay_hotkey` →
+   `browser_underlay::handle_hotkey`, so the app model stays the single
+   owner of interactive state (`interactive` latched ‖ `interactive_hold`
+   momentary). While effectively interactive the workspace draws a 2px
+   accent border. Still later: per-pane webview rects (mirror
    `PaneId::position_id()` → `element_position_by_id` geometry into native
    view frames, or Route B frame-push via `AssetSource::Raw` for
-   cross-platform); interactive-mode chrome (indicator + Esc keybinding).
+   cross-platform); rebindable hotkey chords (the chords are currently
+   fixed in the ObjC monitor).
 
 ## Known risks
 

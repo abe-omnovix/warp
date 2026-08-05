@@ -2869,6 +2869,9 @@ pub(crate) fn app_callbacks(
         on_window_resized: Some(Box::new(move |ctx| {
             ctx.dispatch_global_action("workspace:save_app", &());
         })),
+        on_browser_underlay_hotkey: Some(Box::new(|window_id, event, ctx| {
+            crate::browser_underlay::handle_hotkey(window_id, event, ctx);
+        })),
         ..Default::default()
     }
 }

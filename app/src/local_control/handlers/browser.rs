@@ -118,11 +118,15 @@ pub(crate) fn interactive(
     ensure_browser_underlay_available()?;
     let params = request.action.params_as::<BooleanValueParams>()?;
     let window_id = require_attached_window(ActionKind::BrowserInteractive, request, ctx)?;
-    ctx.windows()
-        .set_background_webview_interactive(window_id, params.value);
-    BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-        state.set_interactive(window_id, params.value, ctx);
+    // The hold hotkey may be physically held right now, so the state model
+    // decides the effective mode that reaches the webview.
+    let effective = BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+        state.set_interactive(window_id, params.value, ctx)
     });
+    if let Some(effective) = effective {
+        ctx.windows()
+            .set_background_webview_interactive(window_id, effective);
+    }
     Ok(ack(instance_id, ActionKind::BrowserInteractive))
 }
 
@@ -153,13 +157,15 @@ pub(crate) fn status(
         .collect::<Vec<_>>();
     glass_panes.sort();
     let url = underlay.url.clone();
-    let interactive = underlay.interactive;
+    let interactive = underlay.effective_interactive();
+    let interactive_hold = underlay.interactive_hold;
     Ok(json!({
         "action": ActionKind::BrowserStatus.as_str(),
         "window_id": window_id.to_string(),
         "attached": true,
         "url": url,
         "interactive": interactive,
+        "interactive_hold": interactive_hold,
         "glass_panes": glass_panes,
         "glass_opacity": browser_underlay::glass_fill_opacity(window_id, ctx),
     }))

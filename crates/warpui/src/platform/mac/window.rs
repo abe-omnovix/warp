@@ -526,6 +526,10 @@ unsafe extern "C" {
     );
     fn browser_underlay_set_interactive(window: &NSWindow, interactive: Bool);
     fn browser_underlay_detach(window: &NSWindow);
+    fn browser_underlay_set_hotkey_callback(
+        ctx: *mut c_void,
+        callback: BrowserUnderlayHotkeyCallbackC,
+    );
 }
 
 /// C-side callback signature for JavaScript evaluation results; see
@@ -559,6 +563,54 @@ extern "C" fn browser_eval_trampoline(
             .into_owned())
     };
     callback(outcome);
+}
+
+/// C-side callback signature for interactive-mode hotkey gestures; see
+/// `browser_underlay.h`. `event` values match `BrowserUnderlayHotkey`.
+type BrowserUnderlayHotkeyCallbackC =
+    extern "C" fn(ctx: *mut c_void, window: *mut NSWindow, event: i32);
+
+extern "C" fn browser_hotkey_trampoline(_ctx: *mut c_void, window: *mut NSWindow, event: i32) {
+    let event = match event {
+        0 => platform::BrowserUnderlayHotkey::Toggle,
+        1 => platform::BrowserUnderlayHotkey::HoldStart,
+        2 => platform::BrowserUnderlayHotkey::HoldEnd,
+        3 => platform::BrowserUnderlayHotkey::ForceOff,
+        _ => return,
+    };
+    // SAFETY: the event monitor passes a live WarpWindow; its window-state
+    // ivar is nulled during teardown, so check before dereferencing.
+    let window_state = unsafe {
+        let Some(window_object) = (window as *mut Object).as_ref() else {
+            return;
+        };
+        let wrapper_ptr: *mut c_void = *window_object.get_ivar(WINDOW_STATE_IVAR);
+        if wrapper_ptr.is_null() {
+            return;
+        }
+        Ivar::get_state(wrapper_ptr).clone()
+    };
+    dispatch_browser_hotkey(window_state, event);
+}
+
+/// Mirrors `dispatch_window_resized`'s borrow discipline: hotkey events arrive
+/// from a local event monitor during AppKit event dispatch, which can already
+/// hold the app borrow, so defer to the foreground executor when it does.
+fn dispatch_browser_hotkey(window_state: Rc<WindowState>, event: platform::BrowserUnderlayHotkey) {
+    if app::callback_dispatcher().can_borrow_mut() {
+        app::callback_dispatcher().browser_underlay_hotkey(window_state.window_id, event);
+    } else {
+        let weak_window_state = Rc::downgrade(&window_state);
+        window_state
+            .executor
+            .spawn(async move {
+                if let Some(window_state) = weak_window_state.upgrade() {
+                    app::callback_dispatcher()
+                        .browser_underlay_hotkey(window_state.window_id, event);
+                }
+            })
+            .detach();
+    }
 }
 
 extern "C" fn browser_snapshot_trampoline(
@@ -970,6 +1022,17 @@ impl Window {
     /// and starts loading `url`. Returns false if the window cannot host an
     /// underlay (e.g. it is a panel) or was not found.
     pub fn attach_background_webview(window_id: WindowId, url: &str) -> bool {
+        // The hotkey monitor is app-wide; register its callback once, before
+        // the first underlay exists that could produce gestures.
+        static HOTKEY_CALLBACK: std::sync::Once = std::sync::Once::new();
+        HOTKEY_CALLBACK.call_once(|| {
+            // SAFETY: registers a process-wide C callback with a static
+            // trampoline; the ctx pointer is unused.
+            unsafe {
+                browser_underlay_set_hotkey_callback(ptr::null_mut(), browser_hotkey_trampoline);
+            }
+        });
+
         let Ok(url) = CString::new(url) else {
             return false;
         };

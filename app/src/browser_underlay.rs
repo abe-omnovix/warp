@@ -128,6 +128,22 @@ fn apply_ambience_url_setting(ctx: &mut AppContext) {
     }
 }
 
+/// Handles an interactive-mode hotkey reported by the platform's event
+/// monitor (⌘⇧B toggle, Globe/Fn momentary hold, ⌘Esc force-off), flipping
+/// the model state and pushing the effective mode down to the webview.
+pub fn handle_hotkey(
+    window_id: WindowId,
+    event: warpui::platform::BrowserUnderlayHotkey,
+    ctx: &mut AppContext,
+) {
+    let effective = BrowserUnderlayState::handle(ctx)
+        .update(ctx, |state, ctx| state.apply_hotkey(window_id, event, ctx));
+    if let Some(effective) = effective {
+        ctx.windows()
+            .set_background_webview_interactive(window_id, effective);
+    }
+}
+
 /// The effective glass fill opacity for `window_id`: the per-window override
 /// when set (via `pane.glass.set`), otherwise the `glass_opacity` setting.
 ///
@@ -176,7 +192,11 @@ pub fn pane_fill_opacity(window_id: WindowId, pane_id: PaneId, app: &AppContext)
 #[derive(Debug, Clone, Default)]
 pub struct WindowUnderlay {
     pub url: String,
+    /// Latched interactive mode (control plane, or the toggle hotkey).
     pub interactive: bool,
+    /// Momentary interactive mode: true while the hold hotkey (Globe/Fn) is
+    /// physically held. Never persisted, cleared on release or force-off.
+    pub interactive_hold: bool,
     /// Panes rendered as translucent night-glass portholes onto the underlay.
     /// Empty ⇒ the whole window renders as glass (ambience mode).
     ///
@@ -186,6 +206,14 @@ pub struct WindowUnderlay {
     pub glass_panes: HashSet<PaneId>,
     /// Per-window override of the `glass_opacity` setting (0-100).
     pub glass_opacity_override: Option<u8>,
+}
+
+impl WindowUnderlay {
+    /// Whether input currently reaches the underlay page, via either the
+    /// latched toggle or the momentary hold.
+    pub fn effective_interactive(&self) -> bool {
+        self.interactive || self.interactive_hold
+    }
 }
 
 /// Singleton model tracking which windows have a browser background underlay
@@ -242,17 +270,54 @@ impl BrowserUnderlayState {
         ctx.notify();
     }
 
+    /// Sets latched interactive mode. Returns the new *effective* interactive
+    /// state (a held hold-hotkey keeps input flowing even when latched off),
+    /// or `None` when no underlay is attached.
     pub fn set_interactive(
         &mut self,
         window_id: WindowId,
         interactive: bool,
         ctx: &mut ModelContext<Self>,
-    ) {
-        if let Some(underlay) = self.windows.get_mut(&window_id) {
-            underlay.interactive = interactive;
-            ctx.emit(BrowserUnderlayEvent::Changed(window_id));
-            ctx.notify();
+    ) -> Option<bool> {
+        let underlay = self.windows.get_mut(&window_id)?;
+        underlay.interactive = interactive;
+        let effective = underlay.effective_interactive();
+        ctx.emit(BrowserUnderlayEvent::Changed(window_id));
+        ctx.notify();
+        Some(effective)
+    }
+
+    /// Applies an interactive-mode hotkey gesture to the window's underlay.
+    /// Returns the new effective interactive state, or `None` when no underlay
+    /// is attached (the gesture is ignored).
+    pub fn apply_hotkey(
+        &mut self,
+        window_id: WindowId,
+        event: warpui::platform::BrowserUnderlayHotkey,
+        ctx: &mut ModelContext<Self>,
+    ) -> Option<bool> {
+        use warpui::platform::BrowserUnderlayHotkey;
+
+        let underlay = self.windows.get_mut(&window_id)?;
+        match event {
+            BrowserUnderlayHotkey::Toggle => {
+                underlay.interactive = !underlay.interactive;
+            }
+            BrowserUnderlayHotkey::HoldStart => {
+                underlay.interactive_hold = true;
+            }
+            BrowserUnderlayHotkey::HoldEnd => {
+                underlay.interactive_hold = false;
+            }
+            BrowserUnderlayHotkey::ForceOff => {
+                underlay.interactive = false;
+                underlay.interactive_hold = false;
+            }
         }
+        let effective = underlay.effective_interactive();
+        ctx.emit(BrowserUnderlayEvent::Changed(window_id));
+        ctx.notify();
+        Some(effective)
     }
 
     /// Adds or removes `pane_id` from the window's glass set, optionally

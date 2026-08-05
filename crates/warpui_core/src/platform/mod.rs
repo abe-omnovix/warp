@@ -557,6 +557,21 @@ pub type BrowserJsEvalCallback = Box<dyn FnOnce(Result<String, String>) + 'stati
 /// background-webview snapshot.
 pub type BrowserSnapshotCallback = Box<dyn FnOnce(Result<Vec<u8>, String>) + 'static>;
 
+/// Interactive-mode hotkey gestures recognized by the platform for the
+/// background webview (macOS installs a local event monitor while an underlay
+/// is attached, so these fire even while the webview owns key events).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserUnderlayHotkey {
+    /// The toggle chord was pressed: flip latched interactive mode.
+    Toggle,
+    /// The hold modifier was engaged: interactive while it stays held.
+    HoldStart,
+    /// The hold modifier was released: end the momentary interaction.
+    HoldEnd,
+    /// The escape chord was pressed: leave interactive mode entirely.
+    ForceOff,
+}
+
 /// Common interface for abstracting platform-specific windowing logic.
 pub trait WindowManager {
     fn open_window(

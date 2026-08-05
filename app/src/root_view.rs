@@ -917,6 +917,19 @@ fn open_from_restored(arg: &OpenFromRestoredArg, ctx: &mut AppContext) {
             }
         }
     }
+
+    // Windows opened here are created with `ctx.add_window` directly rather
+    // than through `open_new_with_workspace_source`, so apply the default
+    // browser underlay (ambience URL setting / test hook) to each of them.
+    // The quake window is skipped: it starts hidden, and an underlay there
+    // would decode video without ever being visible.
+    let quake_window_id = QUAKE_STATE.lock().as_ref().map(|state| state.window_id);
+    let window_ids: Vec<_> = ctx.window_ids().collect();
+    for window_id in window_ids {
+        if Some(window_id) != quake_window_id {
+            crate::browser_underlay::maybe_attach_default_underlay(window_id, ctx);
+        }
+    }
 }
 
 fn path_if_directory(path: &Path) -> Option<&Path> {

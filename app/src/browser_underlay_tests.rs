@@ -260,3 +260,113 @@ fn workspace_drops_to_faint_tint_while_a_pane_is_glass() {
         });
     });
 }
+
+fn apply_hotkey(
+    window_id: WindowId,
+    event: warpui::platform::BrowserUnderlayHotkey,
+    ctx: &mut AppContext,
+) -> Option<bool> {
+    BrowserUnderlayState::handle(ctx)
+        .update(ctx, |state, ctx| state.apply_hotkey(window_id, event, ctx))
+}
+
+#[test]
+fn toggle_hotkey_flips_latched_interactive() {
+    use warpui::platform::BrowserUnderlayHotkey::Toggle;
+
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+            let window_id = WindowId::new();
+            attach(window_id, ctx);
+
+            assert_eq!(apply_hotkey(window_id, Toggle, ctx), Some(true));
+            assert_eq!(apply_hotkey(window_id, Toggle, ctx), Some(false));
+        });
+    });
+}
+
+#[test]
+fn hold_hotkey_is_momentary() {
+    use warpui::platform::BrowserUnderlayHotkey::{HoldEnd, HoldStart};
+
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+            let window_id = WindowId::new();
+            attach(window_id, ctx);
+
+            assert_eq!(apply_hotkey(window_id, HoldStart, ctx), Some(true));
+            assert_eq!(apply_hotkey(window_id, HoldEnd, ctx), Some(false));
+        });
+    });
+}
+
+#[test]
+fn toggle_during_hold_latches_interactive_past_release() {
+    use warpui::platform::BrowserUnderlayHotkey::{HoldEnd, HoldStart, Toggle};
+
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+            let window_id = WindowId::new();
+            attach(window_id, ctx);
+
+            assert_eq!(apply_hotkey(window_id, HoldStart, ctx), Some(true));
+            assert_eq!(apply_hotkey(window_id, Toggle, ctx), Some(true));
+            assert_eq!(apply_hotkey(window_id, HoldEnd, ctx), Some(true));
+        });
+    });
+}
+
+#[test]
+fn force_off_clears_latched_and_hold() {
+    use warpui::platform::BrowserUnderlayHotkey::{ForceOff, HoldStart, Toggle};
+
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+            let window_id = WindowId::new();
+            attach(window_id, ctx);
+            apply_hotkey(window_id, Toggle, ctx);
+            apply_hotkey(window_id, HoldStart, ctx);
+
+            assert_eq!(apply_hotkey(window_id, ForceOff, ctx), Some(false));
+        });
+    });
+}
+
+#[test]
+fn hotkeys_are_ignored_without_an_underlay() {
+    use warpui::platform::BrowserUnderlayHotkey::Toggle;
+
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+
+            assert_eq!(apply_hotkey(WindowId::new(), Toggle, ctx), None);
+        });
+    });
+}
+
+#[test]
+fn latched_off_keeps_effective_interactive_while_held() {
+    use warpui::platform::BrowserUnderlayHotkey::HoldStart;
+
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            init_test_app(ctx);
+            let window_id = WindowId::new();
+            attach(window_id, ctx);
+            apply_hotkey(window_id, HoldStart, ctx);
+
+            // Latching off over the control plane while the hold hotkey is
+            // physically held: input keeps flowing until release.
+            let effective = BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+                state.set_interactive(window_id, false, ctx)
+            });
+
+            assert_eq!(effective, Some(true));
+        });
+    });
+}

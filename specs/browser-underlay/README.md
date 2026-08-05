@@ -42,6 +42,20 @@ warpctrl browser detach
 that's the agent-browsing porthole; `warpctrl pane glass true|false` toggles
 it independently.)
 
+## Interacting with the page yourself
+
+The underlay never steals input by default. Three gestures flip that,
+window-locally, whenever an underlay is attached:
+
+- **⌘⇧B** — toggle interactive mode (input goes to the page until toggled
+  back; an accent border marks the mode).
+- **Hold Globe/Fn** — interactive only while held; release snaps input back
+  to the terminal. Quick Fn-combos (fn+arrows) stay in the terminal.
+- **⌘Esc** — always returns to the terminal, clearing both modes.
+
+Fancy a different key (e.g. CapsLock-as-hold)? Remap CapsLock to the Globe
+key at the OS level (`hidutil` / Karabiner) and the hold gesture follows.
+
 ## Quickstart: agent browsing via MCP
 
 Register `warp-browser-mcp` for Claude Code (or any MCP client) — see `MCP.md`. An agent running inside a Warp pane self-binds to that pane via `WARP_TERMINAL_SESSION_UUID` and can then:

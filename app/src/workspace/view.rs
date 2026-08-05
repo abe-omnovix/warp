@@ -27610,12 +27610,25 @@ impl View for Workspace {
             // With a browser underlay attached, the native webview behind the
             // Metal surface plays the role of the background image: leave the
             // workspace background unpainted so the underlay shows through the
-            // terminals' translucent glass fill. The singleton is absent in
-            // harnesses that skip full app init.
+            // terminals' translucent glass fill. While the underlay is
+            // interactive (input reaches the page instead of the terminal),
+            // an accent border makes the mode switch visible. The singleton
+            // is absent in harnesses that skip full app init.
             _ if app.has_singleton_model::<BrowserUnderlayState>()
                 && BrowserUnderlayState::as_ref(app).is_attached(self.window_id) =>
             {
-                stack.add_child(workspace.finish());
+                let interactive = BrowserUnderlayState::as_ref(app)
+                    .attached(self.window_id)
+                    .is_some_and(|underlay| underlay.effective_interactive());
+                if interactive {
+                    stack.add_child(
+                        workspace
+                            .with_border(Border::all(2.).with_border_fill(theme.accent()))
+                            .finish(),
+                    );
+                } else {
+                    stack.add_child(workspace.finish());
+                }
             }
             _ => {
                 stack.add_child(

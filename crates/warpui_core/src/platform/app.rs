@@ -51,6 +51,10 @@ pub struct AppCallbacks {
     pub on_cpu_awakened: Option<Box<dyn FnMut(&mut AppContext)>>,
     /// Callback to hook into a notification for when the cpu is about to go to sleep.
     pub on_cpu_will_sleep: Option<Box<dyn FnMut(&mut AppContext)>>,
+    /// Callback for interactive-mode hotkeys on a window's background webview
+    /// (see [`crate::platform::BrowserUnderlayHotkey`]).
+    pub on_browser_underlay_hotkey:
+        Option<Box<dyn FnMut(WindowId, crate::platform::BrowserUnderlayHotkey, &mut AppContext)>>,
 }
 
 /// A helper structure to simplify and standardize the act of making calls from
@@ -220,6 +224,17 @@ impl AppCallbackDispatcher {
     pub fn window_moved(&mut self) {
         if let Some(callback) = &mut self.callbacks.on_window_moved {
             self.ui_app.update(|ctx| callback(ctx));
+        }
+    }
+
+    /// Dispatches an interactive-mode hotkey for a window's background webview.
+    pub fn browser_underlay_hotkey(
+        &mut self,
+        window_id: WindowId,
+        event: crate::platform::BrowserUnderlayHotkey,
+    ) {
+        if let Some(callback) = &mut self.callbacks.on_browser_underlay_hotkey {
+            self.ui_app.update(|ctx| callback(window_id, event, ctx));
         }
     }
 

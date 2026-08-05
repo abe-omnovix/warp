@@ -22,6 +22,19 @@ typedef void (*BrowserUnderlayStringCallback)(void *ctx, const char *result, con
 typedef void (*BrowserUnderlayDataCallback)(void *ctx, const uint8_t *bytes, size_t len,
                                             const char *error);
 
+/// Interactive-mode hotkey gestures. Values match the Rust-side
+/// `BrowserUnderlayHotkey` enum in `warpui_core::platform`.
+typedef enum {
+    BrowserUnderlayHotkeyToggle = 0,    // toggle chord (Cmd+Shift+B)
+    BrowserUnderlayHotkeyHoldStart = 1, // hold modifier (Globe/Fn) engaged
+    BrowserUnderlayHotkeyHoldEnd = 2,   // hold modifier released
+    BrowserUnderlayHotkeyForceOff = 3,  // escape chord (Cmd+Esc)
+} BrowserUnderlayHotkeyEvent;
+
+/// Callback invoked on the main thread when an interactive-mode hotkey fires
+/// for a window with an attached underlay.
+typedef void (*BrowserUnderlayHotkeyCallback)(void *ctx, NSWindow *window, int event);
+
 // All functions must be called on the main thread. Functions taking a window
 // no-op (or report an error through their callback) when the window has no
 // underlay attached.
@@ -45,3 +58,10 @@ void browser_underlay_snapshot(NSWindow *window, void *ctx,
 void browser_underlay_set_interactive(NSWindow *window, BOOL interactive);
 
 void browser_underlay_detach(NSWindow *window);
+
+/// Registers the process-wide interactive-mode hotkey callback (replacing any
+/// previous registration) and installs an app-local event monitor. The monitor
+/// only reacts to events in windows that have an underlay attached; hotkey
+/// events are delivered through `callback` rather than acted on directly so
+/// the application stays the single owner of interactive-mode state.
+void browser_underlay_set_hotkey_callback(void *ctx, BrowserUnderlayHotkeyCallback callback);
