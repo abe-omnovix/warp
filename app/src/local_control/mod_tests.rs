@@ -537,3 +537,209 @@ fn disabling_scripting_invalidates_existing_grant_and_prevents_new_grants() {
         assert_eq!(err.code, ErrorCode::LocalControlDisabled);
     });
 }
+
+/// Harness for `/mcp` endpoint tests: bridge singleton + server state with a
+/// known bearer token, mirroring the control-request tests above.
+fn mcp_test_state(app: &mut warpui::App) -> (ControlServerState, String) {
+    let instance_id = InstanceId("inst_test".to_owned());
+    let expected_host = "127.0.0.1:1234".to_owned();
+    let bridge = app.add_singleton_model(LocalControlBridge::new);
+    let state = bridge.update(app, |bridge, ctx| {
+        bridge.set_instance_id(instance_id.clone());
+        ControlServerState {
+            bridge_spawner: ctx.spawner(),
+            instance_id,
+            expected_host: expected_host.clone(),
+            credentials: Default::default(),
+            mcp_token: ::local_control::AuthToken::generate(),
+        }
+    });
+    (state, expected_host)
+}
+
+fn mcp_headers(state: &ControlServerState, expected_host: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(HOST, HeaderValue::from_str(expected_host).expect("host"));
+    headers.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&state.mcp_token.authorization_value()).expect("token"),
+    );
+    headers
+}
+
+async fn mcp_call(
+    state: &ControlServerState,
+    headers: HeaderMap,
+    body: serde_json::Value,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    let response = super::mcp_endpoint::handle_mcp_request(
+        State(state.clone()),
+        headers,
+        Bytes::from(serde_json::to_vec(&body).expect("body serializes")),
+    )
+    .await;
+    let status = response.status();
+    assert!(
+        response.headers().get("mcp-session-id").is_none(),
+        "the stateless endpoint must never mint a session"
+    );
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body reads");
+    let value = if bytes.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&bytes).expect("body is JSON")
+    };
+    (status, value)
+}
+
+#[test]
+fn mcp_endpoint_serves_tools_list_with_valid_token() {
+    warpui::App::test((), |mut app| async move {
+        let (state, host) = mcp_test_state(&mut app);
+        let (status, body) = mcp_call(
+            &state,
+            mcp_headers(&state, &host),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let tools = body
+            .pointer("/result/tools")
+            .and_then(serde_json::Value::as_array)
+            .expect("tools array");
+        assert_eq!(tools.len(), 8);
+    });
+}
+
+#[test]
+fn mcp_endpoint_rejects_bad_tokens_and_browser_origins() {
+    warpui::App::test((), |mut app| async move {
+        let (state, host) = mcp_test_state(&mut app);
+        let list = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_str(&host).expect("host"));
+        let (status, _) = mcp_call(&state, headers.clone(), list.clone()).await;
+        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer wrong"));
+        let (status, _) = mcp_call(&state, headers, list.clone()).await;
+        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+
+        // Origin rejection fires even before token validation.
+        let mut headers = mcp_headers(&state, &host);
+        headers.insert(ORIGIN, HeaderValue::from_static("https://evil.example"));
+        let (status, _) = mcp_call(&state, headers, list).await;
+        assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+    });
+}
+
+#[test]
+fn mcp_notifications_are_acknowledged_without_a_body() {
+    warpui::App::test((), |mut app| async move {
+        let (state, host) = mcp_test_state(&mut app);
+        let (status, body) = mcp_call(
+            &state,
+            mcp_headers(&state, &host),
+            serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::ACCEPTED);
+        assert_eq!(body, serde_json::Value::Null);
+    });
+}
+
+#[test]
+fn mcp_legacy_initialize_echoes_protocol_version_without_a_session() {
+    warpui::App::test((), |mut app| async move {
+        let (state, host) = mcp_test_state(&mut app);
+        let (status, body) = mcp_call(
+            &state,
+            mcp_headers(&state, &host),
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "initialize",
+                "params": { "protocolVersion": "2025-03-26", "capabilities": {} },
+            }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(
+            body.pointer("/result/protocolVersion"),
+            Some(&serde_json::json!("2025-03-26"))
+        );
+        assert!(body.pointer("/result/capabilities/tools").is_some());
+    });
+}
+
+#[test]
+fn mcp_tool_call_without_pane_binding_is_a_tool_error() {
+    warpui::App::test((), |mut app| async move {
+        let (state, host) = mcp_test_state(&mut app);
+        let (status, body) = mcp_call(
+            &state,
+            mcp_headers(&state, &host),
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": { "name": "browser_status", "arguments": {} },
+            }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(
+            body.pointer("/result/isError"),
+            Some(&serde_json::json!(true))
+        );
+        let text = body
+            .pointer("/result/content/0/text")
+            .and_then(serde_json::Value::as_str)
+            .expect("error text");
+        assert!(text.contains("pane"), "{text}");
+    });
+}
+
+#[test]
+fn mcp_tool_calls_pass_the_browser_control_permission_gate() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+    warpui::App::test((), |mut app| async move {
+        crate::test_util::settings::initialize_settings_for_tests(&mut app);
+        // Scripting on, allow_browser_control left at its default (off): the
+        // bearer token must not bypass the per-action permission check.
+        app.update(|ctx| {
+            LocalControlSettings::handle(ctx).update(ctx, |settings, ctx| {
+                settings
+                    .local_control_mode
+                    .set_value(LocalControlMode::Enabled, ctx)
+            })
+        })
+        .expect("local control should enable");
+
+        let (state, host) = mcp_test_state(&mut app);
+        let mut headers = mcp_headers(&state, &host);
+        headers.insert(
+            "x-warp-pane",
+            HeaderValue::from_static("deadbeefdeadbeefdeadbeefdeadbeef"),
+        );
+        let (status, body) = mcp_call(
+            &state,
+            headers,
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": { "name": "browser_status", "arguments": {} },
+            }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(
+            body.pointer("/result/isError"),
+            Some(&serde_json::json!(true))
+        );
+    });
+}
