@@ -329,6 +329,38 @@ pub(crate) fn pane_glass_set(
     Ok(ack(instance_id, ActionKind::PaneGlassSet))
 }
 
+/// `browser.mcp.env` — the Warp-hosted MCP endpoint URL and bearer token.
+///
+/// Normally these reach agents through pane-shell environment variables; this
+/// action covers shells that did not inherit them (tmux, ssh, editors).
+/// Revealing the token here grants no capability the caller lacks: it is
+/// broker-authenticated (same-UID) and gated on `allow_browser_control`, and
+/// such a caller can already perform every browser action directly.
+pub(crate) fn mcp_env(
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<serde_json::Value, ControlError> {
+    ensure_browser_underlay_available()?;
+    let env = ctx
+        .has_singleton_model::<crate::local_control::LocalControlServer>()
+        .then(|| {
+            crate::local_control::LocalControlServer::as_ref(ctx)
+                .mcp_env
+                .clone()
+        })
+        .flatten();
+    let Some((url, token)) = env else {
+        return Err(ControlError::new(
+            ErrorCode::TargetStateConflict,
+            "the MCP endpoint is not running (enable Settings › Scripting)",
+        ));
+    };
+    Ok(json!({
+        "action": ActionKind::BrowserMcpEnv.as_str(),
+        "url": url,
+        "token": token.secret(),
+    }))
+}
+
 pub(crate) fn eval(
     request: &RequestEnvelope,
     ctx: &mut ModelContext<LocalControlBridge>,

@@ -599,6 +599,7 @@ pub(super) fn run_browser_command(
             },
             output_format,
         ),
+        BrowserCommand::McpEnv(args) => run_action(args, ActionKind::BrowserMcpEnv, output_format),
     }
 }
 

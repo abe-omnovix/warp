@@ -385,6 +385,10 @@ pub enum BrowserCommand {
 
     /// Detach a browser underlay.
     Detach(BrowserRouteArgs),
+
+    /// Print the Warp-hosted MCP endpoint URL and bearer token (for shells
+    /// that did not inherit WARP_MCP_URL/WARP_MCP_TOKEN from a pane).
+    McpEnv(TargetArgs),
 }
 
 /// Routing flags shared by all `browser` subcommands: the window's ambience

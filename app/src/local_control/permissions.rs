@@ -81,6 +81,7 @@ pub(crate) fn requires_browser_control(action: ActionKind) -> bool {
             | ActionKind::BrowserInteractive
             | ActionKind::BrowserStatus
             | ActionKind::BrowserDetach
+            | ActionKind::BrowserMcpEnv
             | ActionKind::PaneGlassSet
     )
 }

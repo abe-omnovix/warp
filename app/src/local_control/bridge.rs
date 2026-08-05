@@ -202,6 +202,7 @@ impl LocalControlBridge {
             ActionKind::BrowserStatus => browser::status(&request, ctx),
             ActionKind::BrowserDetach => browser::detach(&self.instance_id, &request, ctx),
             ActionKind::PaneGlassSet => browser::pane_glass_set(&self.instance_id, &request, ctx),
+            ActionKind::BrowserMcpEnv => browser::mcp_env(ctx),
             // Async handlers: WebKit completes these on its own schedule, so
             // they hand back a pending receiver the transport awaits.
             ActionKind::BrowserEval => return browser::eval(&request, ctx),

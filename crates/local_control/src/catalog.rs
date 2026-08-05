@@ -69,6 +69,7 @@ pub enum ActionResultSpec {
     ActiveTarget,
     AppearanceState,
     BrowserEvalResult,
+    BrowserMcpEnv,
     BrowserScreenshot,
     BrowserStatus,
     CapabilityList,
@@ -312,5 +313,6 @@ define_action_catalog! {
         BrowserInteractive => { name: "browser.interactive", status: Implemented, target: Window, params: BrowserInteractive, result: Acknowledgement },
         BrowserStatus => { name: "browser.status", status: Implemented, target: Window, params: BrowserTarget, result: BrowserStatus },
         BrowserDetach => { name: "browser.detach", status: Implemented, target: Window, params: BrowserTarget, result: Acknowledgement },
+        BrowserMcpEnv => { name: "browser.mcp.env", status: Implemented, target: Instance, params: None, result: BrowserMcpEnv },
     }
 }

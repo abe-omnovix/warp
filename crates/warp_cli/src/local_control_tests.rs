@@ -610,6 +610,10 @@ fn retained_action_examples() -> Vec<(ActionKind, Vec<&'static str>)> {
             vec!["warpctrl", "browser", "detach"],
         ),
         (
+            ActionKind::BrowserMcpEnv,
+            vec!["warpctrl", "browser", "mcp-env"],
+        ),
+        (
             ActionKind::PaneGlassSet,
             vec!["warpctrl", "pane", "glass", "true", "--opacity", "55"],
         ),
@@ -721,6 +725,7 @@ fn parsed_action_kind(command: &ControlCommand) -> Option<ActionKind> {
             BrowserCommand::Interactive(_) => Some(ActionKind::BrowserInteractive),
             BrowserCommand::Status(_) => Some(ActionKind::BrowserStatus),
             BrowserCommand::Detach(_) => Some(ActionKind::BrowserDetach),
+            BrowserCommand::McpEnv(_) => Some(ActionKind::BrowserMcpEnv),
         },
         ControlCommand::Surface(command) => match command {
             SurfaceCommand::List(_) => Some(ActionKind::SurfaceList),
