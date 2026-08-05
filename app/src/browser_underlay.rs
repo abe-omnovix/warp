@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use ::settings::Setting as _;
 use warp_core::features::FeatureFlag;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity, WindowId};
 

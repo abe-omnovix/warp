@@ -20,7 +20,9 @@ use super::settings_page::{
 use super::{SettingsSection, ToggleState};
 use crate::appearance::Appearance;
 use crate::features::FeatureFlag;
-use crate::settings::{LocalControlMode, LocalControlModeSetting, LocalControlSettings};
+use crate::settings::{
+    AllowBrowserControlSetting, LocalControlMode, LocalControlModeSetting, LocalControlSettings,
+};
 #[cfg(target_os = "macos")]
 use crate::view_components::DismissibleToast;
 use crate::view_components::{Dropdown, DropdownItem};
@@ -30,6 +32,7 @@ use crate::workspace::{ToastStack, cli_install};
 #[derive(Clone, Debug, PartialEq)]
 pub enum ScriptingSettingsPageAction {
     SetLocalControlMode(LocalControlMode),
+    ToggleAllowBrowserControl,
     #[cfg(target_os = "macos")]
     InstallWarpControlCli,
 }
@@ -62,13 +65,19 @@ impl ScriptingSettingsPageView {
         }
 
         #[cfg(target_os = "macos")]
-        let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> = vec![
+        let mut widgets: Vec<Box<dyn SettingsWidget<View = Self>>> = vec![
             Box::new(WarpControlCliInstallWidget::default()),
             Box::new(LocalControlModeWidget),
         ];
         #[cfg(not(target_os = "macos"))]
-        let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> =
+        let mut widgets: Vec<Box<dyn SettingsWidget<View = Self>>> =
             vec![Box::new(LocalControlModeWidget)];
+
+        // Feature-flag gate: fixed for the process, so the widget is simply
+        // never built when the browser underlay is unavailable.
+        if crate::browser_underlay::BrowserUnderlayState::feature_enabled() {
+            widgets.push(Box::new(AllowBrowserControlWidget::default()));
+        }
 
         Self {
             page: PageType::new_uncategorized(widgets, Some("Scripting")),
@@ -161,6 +170,13 @@ impl TypedActionView for ScriptingSettingsPageView {
             ScriptingSettingsPageAction::SetLocalControlMode(mode) => {
                 LocalControlSettings::handle(ctx).update(ctx, |settings, ctx| {
                     report_if_error!(settings.local_control_mode.set_value(*mode, ctx));
+                });
+                ctx.notify();
+            }
+            ScriptingSettingsPageAction::ToggleAllowBrowserControl => {
+                LocalControlSettings::handle(ctx).update(ctx, |settings, ctx| {
+                    let new_value = !*settings.allow_browser_control.value();
+                    report_if_error!(settings.allow_browser_control.set_value(new_value, ctx));
                 });
                 ctx.notify();
             }
@@ -269,6 +285,59 @@ impl SettingsWidget for WarpControlCliInstallWidget {
         )
     }
 }
+/// Toggle for the `browser.*` / `pane.glass.*` action family. Only built when
+/// the browser-underlay feature is enabled.
+#[derive(Default)]
+struct AllowBrowserControlWidget {
+    switch_state: warpui::ui_components::switch::SwitchStateHandle,
+}
+
+impl SettingsWidget for AllowBrowserControlWidget {
+    type View = ScriptingSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "browser control underlay glass eval screenshot allow permission"
+    }
+
+    fn render(
+        &self,
+        view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let enabled = LocalControlSettings::as_ref(app).browser_control_allowed();
+        render_body_item::<ScriptingSettingsPageAction>(
+            "Allow browser control".into(),
+            None,
+            LocalOnlyIconState::for_setting(
+                AllowBrowserControlSetting::storage_key(),
+                AllowBrowserControlSetting::sync_to_cloud(),
+                &mut view.local_only_icon_tooltip_states.borrow_mut(),
+                app,
+            ),
+            ToggleState::Enabled,
+            appearance,
+            appearance
+                .ui_builder()
+                .switch(self.switch_state.clone())
+                .check(enabled)
+                .build()
+                .on_click(|ctx, _, _| {
+                    ctx.dispatch_typed_action(
+                        ScriptingSettingsPageAction::ToggleAllowBrowserControl,
+                    );
+                })
+                .finish(),
+            Some(
+                "Let warpctrl and agent tools attach and drive a browser underlay \
+                 (browser.* and pane.glass.* actions), including running JavaScript \
+                 in the underlay page. Off by default; use with care."
+                    .to_owned(),
+            ),
+        )
+    }
+}
+
 struct LocalControlModeWidget;
 
 impl SettingsWidget for LocalControlModeWidget {

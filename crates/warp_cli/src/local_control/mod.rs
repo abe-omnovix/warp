@@ -9,10 +9,10 @@ use std::process::ExitCode;
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use clap_complete::aot::Shell;
 use commands::{
-    run_action_catalog_command, run_app_command, run_appearance_command, run_capability_command,
-    run_file_command, run_input_command, run_instance_command, run_keybinding_command,
-    run_pane_command, run_session_command, run_setting_command, run_surface_command,
-    run_tab_command, run_theme_command, run_window_command,
+    run_action_catalog_command, run_app_command, run_appearance_command, run_browser_command,
+    run_capability_command, run_file_command, run_input_command, run_instance_command,
+    run_keybinding_command, run_pane_command, run_session_command, run_setting_command,
+    run_surface_command, run_tab_command, run_theme_command, run_window_command,
 };
 use completions::generate_completions_to_stdout;
 use output::write_control_error;
@@ -188,6 +188,10 @@ pub enum ControlCommand {
     #[command(subcommand)]
     File(FileCommand),
 
+    /// Control the browser underlay behind a Warp window.
+    #[command(subcommand)]
+    Browser(BrowserCommand),
+
     /// Open or toggle local Warp surfaces.
     #[command(subcommand)]
     Surface(SurfaceCommand),
@@ -349,6 +353,107 @@ pub enum PaneCommand {
 
     /// Reset a pane name.
     ResetName(TargetArgs),
+
+    /// Enable or disable night glass on a pane (requires an attached browser
+    /// underlay and the browser-control permission).
+    Glass(PaneGlassArgs),
+}
+
+/// Commands that control the browser underlay behind a Warp window.
+///
+/// Every command requires the `allow_browser_control` permission
+/// (Settings > Scripting) on top of local control being enabled.
+#[derive(Debug, Clone, Subcommand)]
+pub enum BrowserCommand {
+    /// Attach a browser underlay to a window and load a URL.
+    Attach(BrowserAttachArgs),
+
+    /// Navigate the attached browser underlay to a URL.
+    Navigate(BrowserUrlArgs),
+
+    /// Evaluate JavaScript in the attached browser underlay.
+    Eval(BrowserEvalArgs),
+
+    /// Capture a PNG screenshot of the attached browser underlay.
+    Screenshot(BrowserScreenshotArgs),
+
+    /// Toggle whether input events reach the browser underlay.
+    Interactive(BrowserInteractiveArgs),
+
+    /// Show the browser underlay state for a window.
+    Status(TargetArgs),
+
+    /// Detach the browser underlay from a window.
+    Detach(TargetArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct BrowserAttachArgs {
+    /// URL to load in the underlay.
+    pub url: String,
+
+    /// Do not turn the targeted pane to night glass.
+    #[arg(long = "no-glass")]
+    pub no_glass: bool,
+
+    /// Glass fill opacity override (0-100) for the window.
+    #[arg(long = "glass-opacity")]
+    pub glass_opacity: Option<u8>,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct BrowserUrlArgs {
+    /// URL to navigate to.
+    pub url: String,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct BrowserEvalArgs {
+    /// JavaScript source to evaluate in the underlay page.
+    pub javascript: String,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct BrowserScreenshotArgs {
+    /// Write the PNG to this path instead of printing base64 JSON.
+    #[arg(long = "output")]
+    pub output: Option<std::path::PathBuf>,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct BrowserInteractiveArgs {
+    /// Whether the underlay receives input events.
+    #[arg(action = clap::ArgAction::Set)]
+    pub enabled: bool,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct PaneGlassArgs {
+    /// Whether the pane renders as night glass.
+    #[arg(action = clap::ArgAction::Set)]
+    pub enabled: bool,
+
+    /// Glass fill opacity override (0-100) for the pane's window.
+    #[arg(long = "opacity")]
+    pub opacity: Option<u8>,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
 }
 
 /// Commands that inspect local Warp sessions.
@@ -929,6 +1034,7 @@ fn run_inner(args: ControlArgs) -> Result<(), local_control::protocol::ControlEr
         ControlCommand::Setting(command) => run_setting_command(command, output_format),
         ControlCommand::Keybinding(command) => run_keybinding_command(command, output_format),
         ControlCommand::File(command) => run_file_command(command, output_format),
+        ControlCommand::Browser(command) => run_browser_command(command, output_format),
         ControlCommand::Surface(command) => run_surface_command(command, output_format),
         ControlCommand::Completions { shell } => generate_completions_to_stdout(shell),
     }

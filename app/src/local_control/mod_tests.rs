@@ -26,11 +26,21 @@ use super::{
     validate_action_params, validate_loopback_headers, validate_request_authority,
     validate_tab_create_target,
 };
-use crate::settings::{LocalControlMode, LocalControlModeSetting, LocalControlSettings};
+use crate::settings::{
+    AllowBrowserControlSetting, LocalControlMode, LocalControlModeSetting, LocalControlSettings,
+};
 
 fn settings_with_mode(mode: LocalControlMode) -> LocalControlSettings {
+    settings_with_permissions(mode, false)
+}
+
+fn settings_with_permissions(
+    mode: LocalControlMode,
+    allow_browser_control: bool,
+) -> LocalControlSettings {
     LocalControlSettings {
         local_control_mode: LocalControlModeSetting::new(Some(mode)),
+        allow_browser_control: AllowBrowserControlSetting::new(Some(allow_browser_control)),
     }
 }
 #[cfg(unix)]
@@ -153,7 +163,7 @@ fn surface_list_rejects_target_selectors() {
 
 #[test]
 fn capabilities_advertises_the_complete_catalog() {
-    assert_eq!(capabilities().len(), 84);
+    assert_eq!(capabilities().len(), 92);
 }
 
 #[test]
@@ -267,6 +277,91 @@ fn scripting_enabled_allows_action() {
         ActionKind::TabCreate,
     )
     .expect("enabled scripting allows action");
+}
+
+#[test]
+fn browser_action_denied_without_browser_control_permission() {
+    let settings = settings_with_permissions(LocalControlMode::Enabled, false);
+
+    let err = ensure_settings_allow_action(&settings, ActionKind::BrowserAttach)
+        .expect_err("browser.attach requires the browser-control permission");
+    assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+}
+
+#[test]
+fn pane_glass_denied_without_browser_control_permission() {
+    let settings = settings_with_permissions(LocalControlMode::Enabled, false);
+
+    let err = ensure_settings_allow_action(&settings, ActionKind::PaneGlassSet)
+        .expect_err("pane.glass.set requires the browser-control permission");
+    assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+}
+
+#[test]
+fn browser_action_allowed_with_browser_control_permission() {
+    let settings = settings_with_permissions(LocalControlMode::Enabled, true);
+
+    ensure_settings_allow_action(&settings, ActionKind::BrowserEval)
+        .expect("browser.eval is allowed once browser control is granted");
+}
+
+#[test]
+fn browser_control_permission_does_not_bypass_scripting_gate() {
+    let settings = settings_with_permissions(LocalControlMode::Disabled, true);
+
+    let err = ensure_settings_allow_action(&settings, ActionKind::BrowserAttach)
+        .expect_err("disabled scripting denies browser actions too");
+    assert_eq!(err.code, ErrorCode::LocalControlDisabled);
+}
+
+#[test]
+fn non_browser_actions_do_not_require_browser_control_permission() {
+    let settings = settings_with_permissions(LocalControlMode::Enabled, false);
+
+    ensure_settings_allow_action(&settings, ActionKind::PaneList)
+        .expect("pane.list does not require browser control");
+}
+
+#[test]
+fn browser_attach_params_default_glass_to_enabled() {
+    use ::local_control::protocol::BrowserAttachParams;
+
+    let params: BrowserAttachParams =
+        serde_json::from_value(serde_json::json!({ "url": "https://example.com" }))
+            .expect("url-only attach params are accepted");
+
+    assert!(params.glass);
+    assert_eq!(params.glass_opacity, None);
+}
+
+#[test]
+fn browser_actions_reject_malformed_params() {
+    let err = validate_action_params(&Action {
+        kind: ActionKind::BrowserAttach,
+        params: serde_json::json!({ "glass": true }),
+    })
+    .expect_err("browser.attach requires a url");
+    assert_eq!(err.code, ErrorCode::InvalidParams);
+
+    let err = validate_action_params(&Action {
+        kind: ActionKind::BrowserEval,
+        params: serde_json::json!({}),
+    })
+    .expect_err("browser.eval requires javascript");
+    assert_eq!(err.code, ErrorCode::InvalidParams);
+
+    let err = validate_action_params(&Action {
+        kind: ActionKind::PaneGlassSet,
+        params: serde_json::json!({ "opacity": 55 }),
+    })
+    .expect_err("pane.glass.set requires enabled");
+    assert_eq!(err.code, ErrorCode::InvalidParams);
+
+    validate_action_params(&Action {
+        kind: ActionKind::PaneGlassSet,
+        params: serde_json::json!({ "enabled": true, "opacity": 55 }),
+    })
+    .expect("well-formed pane.glass.set params are accepted");
 }
 
 #[test]

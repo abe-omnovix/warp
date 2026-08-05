@@ -1,11 +1,13 @@
 //! Implementations for user-facing `warpctrl` command groups.
+use base64::Engine as _;
 use local_control::discovery::InstanceRecord;
 use local_control::protocol::{
-    Action, ActionKind, ActionNameParams, BindingNameParams, BooleanValueParams, ColorValueParams,
-    ControlError, DirectionParams, EmptyParams, ErrorCode, FileOpenParams, KeyParams,
-    KeyValueParams, PageQueryParams, QueryParams, RenameParams, RequestEnvelope, ResizeParams,
-    SettingListParams, TabActivateParams, TabActivationMode, TabCloseMode, TabCloseParams,
-    TabCreateParams, TextParams, ThemeNameParams,
+    Action, ActionKind, ActionNameParams, BindingNameParams, BooleanValueParams,
+    BrowserAttachParams, ColorValueParams, ControlError, DirectionParams, EmptyParams, ErrorCode,
+    FileOpenParams, JavascriptParams, KeyParams, KeyValueParams, PageQueryParams, PaneGlassParams,
+    QueryParams, RenameParams, RequestEnvelope, ResizeParams, SettingListParams, TabActivateParams,
+    TabActivationMode, TabCloseMode, TabCloseParams, TabCreateParams, TextParams, ThemeNameParams,
+    UrlParams,
 };
 use local_control::selection::select_instance;
 use serde::Serialize;
@@ -15,11 +17,11 @@ use crate::agent::OutputFormat;
 use crate::local_control::output::{write_json, write_json_line};
 use crate::local_control::selectors::{instance_selector, target_selector};
 use crate::local_control::{
-    ActionCatalogCommand, AppCommand, AppearanceCommand, CapabilityCommand, FileCommand,
-    InputCommand, InstanceCommand, KeybindingCommand, PaneCommand, SessionCommand, SettingCommand,
-    SurfaceCommand, SurfaceOpenCommand, SurfaceOpenToggleCommand, SurfaceQueryCommand,
-    SurfaceSettingsCommand, SurfaceToggleCommand, TabActivateArgs, TabCloseArgs, TabColorCommand,
-    TabCommand, TargetArgs, ThemeCommand, WindowCommand,
+    ActionCatalogCommand, AppCommand, AppearanceCommand, BrowserCommand, CapabilityCommand,
+    FileCommand, InputCommand, InstanceCommand, KeybindingCommand, PaneCommand, SessionCommand,
+    SettingCommand, SurfaceCommand, SurfaceOpenCommand, SurfaceOpenToggleCommand,
+    SurfaceQueryCommand, SurfaceSettingsCommand, SurfaceToggleCommand, TabActivateArgs,
+    TabCloseArgs, TabColorCommand, TabCommand, TargetArgs, ThemeCommand, WindowCommand,
 };
 
 pub(super) fn run_surface_command(
@@ -479,6 +481,101 @@ pub(super) fn run_pane_command(
             output_format,
         ),
         PaneCommand::ResetName(args) => run_action(args, ActionKind::PaneResetName, output_format),
+        PaneCommand::Glass(args) => run_action_with_params(
+            args.target,
+            ActionKind::PaneGlassSet,
+            PaneGlassParams {
+                enabled: args.enabled,
+                opacity: args.opacity,
+            },
+            output_format,
+        ),
+    }
+}
+
+pub(super) fn run_browser_command(
+    command: BrowserCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        BrowserCommand::Attach(args) => run_action_with_params(
+            args.target,
+            ActionKind::BrowserAttach,
+            BrowserAttachParams {
+                url: args.url,
+                glass: !args.no_glass,
+                glass_opacity: args.glass_opacity,
+            },
+            output_format,
+        ),
+        BrowserCommand::Navigate(args) => run_action_with_params(
+            args.target,
+            ActionKind::BrowserNavigate,
+            UrlParams { url: args.url },
+            output_format,
+        ),
+        BrowserCommand::Eval(args) => run_action_with_params(
+            args.target,
+            ActionKind::BrowserEval,
+            JavascriptParams {
+                javascript: args.javascript,
+            },
+            output_format,
+        ),
+        BrowserCommand::Screenshot(args) => {
+            let data =
+                send_action_request(args.target, ActionKind::BrowserScreenshot, EmptyParams {})?;
+            if let Some(path) = args.output {
+                let encoded = data
+                    .get("data_base64")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        ControlError::new(
+                            ErrorCode::Internal,
+                            "browser.screenshot response is missing PNG data",
+                        )
+                    })?;
+                let png_bytes = base64::engine::general_purpose::STANDARD
+                    .decode(encoded)
+                    .map_err(|err| {
+                        ControlError::with_details(
+                            ErrorCode::Internal,
+                            "browser.screenshot response contains invalid base64 PNG data",
+                            err.to_string(),
+                        )
+                    })?;
+                std::fs::write(&path, png_bytes).map_err(|err| {
+                    ControlError::with_details(
+                        ErrorCode::Internal,
+                        format!("failed to write screenshot to {}", path.display()),
+                        err.to_string(),
+                    )
+                })?;
+                println!("Wrote browser screenshot to {}", path.display());
+                return Ok(());
+            }
+            write_action_data(ActionKind::BrowserScreenshot, &data, output_format)
+        }
+        BrowserCommand::Interactive(args) => run_action_with_params(
+            args.target,
+            ActionKind::BrowserInteractive,
+            BooleanValueParams {
+                value: args.enabled,
+            },
+            output_format,
+        ),
+        BrowserCommand::Status(args) => run_action_with_params(
+            args,
+            ActionKind::BrowserStatus,
+            EmptyParams {},
+            output_format,
+        ),
+        BrowserCommand::Detach(args) => run_action_with_params(
+            args,
+            ActionKind::BrowserDetach,
+            EmptyParams {},
+            output_format,
+        ),
     }
 }
 
@@ -772,6 +869,16 @@ fn run_action_with_params<T: Serialize>(
     params: T,
     output_format: OutputFormat,
 ) -> Result<(), ControlError> {
+    let data = send_action_request(args, action, params)?;
+    write_action_data(action, &data, output_format)
+}
+
+/// Sends one authenticated request and returns the success payload.
+fn send_action_request<T: Serialize>(
+    args: TargetArgs,
+    action: ActionKind,
+    params: T,
+) -> Result<serde_json::Value, ControlError> {
     let selector = instance_selector(&args);
     let records = local_control::discovery::list_instances(&ChannelState::channel().to_string());
     let target = target_selector(&args)?;
@@ -785,11 +892,19 @@ fn run_action_with_params<T: Serialize>(
             "local-control request failed without an error payload",
         ));
     };
+    Ok(data)
+}
+
+fn write_action_data(
+    action: ActionKind,
+    data: &serde_json::Value,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
     match output_format {
-        OutputFormat::Json => write_json(&data),
-        OutputFormat::Ndjson => write_json_line(&data),
+        OutputFormat::Json => write_json(data),
+        OutputFormat::Ndjson => write_json_line(data),
         OutputFormat::Pretty | OutputFormat::Text => {
-            println!("{}", render_human_readable(action, &data));
+            println!("{}", render_human_readable(action, data));
             Ok(())
         }
     }

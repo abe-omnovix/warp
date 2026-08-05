@@ -38,13 +38,16 @@ pub enum ActionParameterSpec {
     ActionName,
     BindingName,
     BooleanValue,
+    BrowserAttach,
     ColorValue,
     Direction,
     FileOpen,
+    Javascript,
     Key,
     KeyValue,
     Namespace,
     PageQuery,
+    PaneGlass,
     Query,
     Rename,
     Resize,
@@ -53,6 +56,7 @@ pub enum ActionParameterSpec {
     TabCreate,
     Text,
     ThemeName,
+    Url,
 }
 
 /// Typed result contract for a catalog action.
@@ -62,6 +66,9 @@ pub enum ActionResultSpec {
     Acknowledgement,
     ActiveTarget,
     AppearanceState,
+    BrowserEvalResult,
+    BrowserScreenshot,
+    BrowserStatus,
     CapabilityList,
     CapabilityMetadata,
     InstanceList,
@@ -215,6 +222,7 @@ define_action_catalog! {
         PaneClose => { name: "pane.close", status: Implemented, target: Pane, params: None, result: Acknowledgement },
         PaneRename => { name: "pane.rename", status: Implemented, target: Pane, params: Rename, result: Acknowledgement },
         PaneResetName => { name: "pane.reset_name", status: Implemented, target: Pane, params: None, result: Acknowledgement },
+        PaneGlassSet => { name: "pane.glass.set", status: Implemented, target: Pane, params: PaneGlass, result: Acknowledgement },
     }
 
     session {
@@ -292,5 +300,15 @@ define_action_catalog! {
 
     file {
         FileOpen => { name: "file.open", status: Implemented, target: File, params: FileOpen, result: Acknowledgement },
+    }
+
+    browser {
+        BrowserAttach => { name: "browser.attach", status: Implemented, target: Window, params: BrowserAttach, result: Acknowledgement },
+        BrowserNavigate => { name: "browser.navigate", status: Implemented, target: Window, params: Url, result: Acknowledgement },
+        BrowserEval => { name: "browser.eval", status: Implemented, target: Window, params: Javascript, result: BrowserEvalResult },
+        BrowserScreenshot => { name: "browser.screenshot", status: Implemented, target: Window, params: None, result: BrowserScreenshot },
+        BrowserInteractive => { name: "browser.interactive", status: Implemented, target: Window, params: BooleanValue, result: Acknowledgement },
+        BrowserStatus => { name: "browser.status", status: Implemented, target: Window, params: None, result: BrowserStatus },
+        BrowserDetach => { name: "browser.detach", status: Implemented, target: Window, params: None, result: Acknowledgement },
     }
 }

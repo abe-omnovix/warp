@@ -2239,6 +2239,15 @@ impl PaneGroup {
             .map(|pane| pane.id())
     }
 
+    /// Returns the hex-encoded persistent session UUID for the terminal pane
+    /// with the given id — the same value Warp injects into the pane's shell
+    /// as `WARP_TERMINAL_SESSION_UUID` — or `None` for non-terminal panes.
+    pub fn terminal_session_uuid_hex(&self, pane_id: PaneId) -> Option<String> {
+        self.panes_of::<TerminalPane>()
+            .find(|pane| pane.id() == pane_id)
+            .map(|pane| hex::encode(pane.session_uuid()))
+    }
+
     /// Iterate over the code editors in this pane group.
     pub fn code_panes<'a>(
         &'a self,

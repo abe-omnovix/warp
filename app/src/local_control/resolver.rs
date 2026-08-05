@@ -1,10 +1,11 @@
 //! Target resolution and parameter validation for retained local-control actions.
 use ::local_control::protocol::{
-    ActionNameParams, ActionParameterSpec, BindingNameParams, BooleanValueParams, ColorValueParams,
-    DirectionParams, EmptyParams, FileOpenParams, KeyParams, KeyValueParams, NamespaceParams,
-    PageQueryParams, PaneTarget, QueryParams, RenameParams, ResizeParams, SessionTarget,
-    TabActivateParams, TabCloseParams, TabCreateParams, TabTarget, TargetSelector, TextParams,
-    ThemeNameParams, WindowTarget,
+    ActionNameParams, ActionParameterSpec, BindingNameParams, BooleanValueParams,
+    BrowserAttachParams, ColorValueParams, DirectionParams, EmptyParams, FileOpenParams,
+    JavascriptParams, KeyParams, KeyValueParams, NamespaceParams, PageQueryParams, PaneGlassParams,
+    PaneTarget, QueryParams, RenameParams, ResizeParams, SessionTarget, TabActivateParams,
+    TabCloseParams, TabCreateParams, TabTarget, TargetSelector, TextParams, ThemeNameParams,
+    UrlParams, WindowTarget,
 };
 use ::local_control::{ActionKind, ControlError, ErrorCode, TargetScope};
 use warpui::{AppContext, ModelContext, TypedActionView, ViewHandle, WindowId};
@@ -36,13 +37,16 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
         }
         ActionParameterSpec::BindingName => parse_params::<BindingNameParams>(action),
         ActionParameterSpec::BooleanValue => parse_params::<BooleanValueParams>(action),
+        ActionParameterSpec::BrowserAttach => parse_params::<BrowserAttachParams>(action),
         ActionParameterSpec::ColorValue => parse_params::<ColorValueParams>(action),
         ActionParameterSpec::Direction => parse_params::<DirectionParams>(action),
         ActionParameterSpec::FileOpen => parse_params::<FileOpenParams>(action),
+        ActionParameterSpec::Javascript => parse_params::<JavascriptParams>(action),
         ActionParameterSpec::Key => parse_params::<KeyParams>(action),
         ActionParameterSpec::KeyValue => parse_params::<KeyValueParams>(action),
         ActionParameterSpec::Namespace => parse_params::<NamespaceParams>(action),
         ActionParameterSpec::PageQuery => parse_params::<PageQueryParams>(action),
+        ActionParameterSpec::PaneGlass => parse_params::<PaneGlassParams>(action),
         ActionParameterSpec::Query => parse_params::<QueryParams>(action),
         ActionParameterSpec::Rename => parse_params::<RenameParams>(action),
         ActionParameterSpec::Resize => parse_params::<ResizeParams>(action),
@@ -51,6 +55,7 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
         ActionParameterSpec::TabCreate => parse_params::<TabCreateParams>(action),
         ActionParameterSpec::Text => parse_params::<TextParams>(action),
         ActionParameterSpec::ThemeName => parse_params::<ThemeNameParams>(action),
+        ActionParameterSpec::Url => parse_params::<UrlParams>(action),
     }
 }
 

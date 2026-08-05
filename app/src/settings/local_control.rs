@@ -63,6 +63,7 @@ impl LocalControlMode {
 
 define_settings_group!(LocalControlSettings, settings: [
     local_control_mode: LocalControlModeSetting,
+    allow_browser_control: AllowBrowserControlSetting,
 ]);
 
 /// Setting wrapper for the authoritative local-control mode.
@@ -202,6 +203,151 @@ impl std::ops::Deref for LocalControlModeSetting {
     }
 }
 
+const ALLOW_BROWSER_CONTROL_STORAGE_KEY: &str = "AllowBrowserControl";
+
+/// Secure local setting gating the `browser.*` and `pane.glass.*` action
+/// family. Default off on every channel — driving a live browser (including
+/// `browser.eval`) is strictly more powerful than the rest of the catalog, so
+/// it requires an explicit opt-in on top of local control itself.
+pub struct AllowBrowserControlSetting {
+    inner: bool,
+    is_explicitly_set: bool,
+}
+
+impl AllowBrowserControlSetting {
+    fn emit_changed(
+        ctx: &mut ModelContext<LocalControlSettings>,
+        change_event_reason: settings::ChangeEventReason,
+    ) {
+        ctx.emit(
+            LocalControlSettingsChangedEvent::AllowBrowserControlSetting {
+                change_event_reason,
+            },
+        );
+    }
+}
+
+impl SecureSetting for AllowBrowserControlSetting {
+    fn write_secure_storage_value(
+        storage: &dyn secure_storage::SecureStorage,
+        key: &str,
+        value: &str,
+    ) -> Result<(), secure_storage::Error> {
+        storage.write_value_with_owner_only_fallback(key, value)
+    }
+}
+
+impl Setting for AllowBrowserControlSetting {
+    type Group = LocalControlSettings;
+    type Value = bool;
+
+    fn new(value: Option<Self::Value>) -> Self {
+        match value {
+            Some(value) => Self {
+                inner: value,
+                is_explicitly_set: true,
+            },
+            None => Self {
+                inner: Self::default_value(),
+                is_explicitly_set: false,
+            },
+        }
+    }
+
+    fn setting_name() -> &'static str {
+        "AllowBrowserControlSetting"
+    }
+
+    fn storage_key() -> &'static str {
+        ALLOW_BROWSER_CONTROL_STORAGE_KEY
+    }
+
+    fn supported_platforms() -> SupportedPlatforms {
+        SupportedPlatforms::MAC
+    }
+
+    fn sync_to_cloud() -> SyncToCloud {
+        SyncToCloud::Never
+    }
+
+    fn is_private() -> bool {
+        true
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.inner
+    }
+
+    fn clear_value(&mut self, ctx: &mut ModelContext<Self::Group>) -> Result<()> {
+        Self::clear_from_secure_storage(ctx)?;
+        self.inner = self.validate(Self::default_value());
+        self.is_explicitly_set = false;
+        Self::emit_changed(ctx, settings::ChangeEventReason::Clear);
+        Ok(())
+    }
+
+    fn load_value(
+        &mut self,
+        new_value: Self::Value,
+        explicitly_set: bool,
+        ctx: &mut ModelContext<Self::Group>,
+    ) -> Result<()> {
+        let validated = self.validate(new_value);
+        if self.value() != &validated || self.is_explicitly_set != explicitly_set {
+            self.inner = validated;
+            self.is_explicitly_set = explicitly_set;
+            Self::emit_changed(ctx, settings::ChangeEventReason::LocalChange);
+        }
+        Ok(())
+    }
+
+    fn set_value_from_cloud_sync(
+        &mut self,
+        _: Self::Value,
+        _: &mut ModelContext<Self::Group>,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn set_value(
+        &mut self,
+        new_value: Self::Value,
+        ctx: &mut ModelContext<Self::Group>,
+    ) -> Result<()> {
+        let changed_in_storage = Self::write_to_secure_storage(&new_value, ctx)?;
+        if self.value() != &new_value || changed_in_storage {
+            self.inner = self.validate(new_value);
+            self.is_explicitly_set = true;
+            Self::emit_changed(ctx, settings::ChangeEventReason::LocalChange);
+        }
+        Ok(())
+    }
+
+    fn default_value() -> Self::Value {
+        false
+    }
+
+    fn new_from_storage(ctx: &mut AppContext) -> Self {
+        Self::new(Self::read_from_secure_storage(ctx))
+    }
+
+    fn is_supported_on_current_platform(&self) -> bool {
+        SupportedPlatforms::MAC.matches_current_platform()
+    }
+
+    fn is_value_explicitly_set(&self) -> bool {
+        self.is_explicitly_set
+    }
+}
+
+impl std::ops::Deref for AllowBrowserControlSetting {
+    type Target = bool;
+
+    fn deref(&self) -> &Self::Target {
+        self.value()
+    }
+}
+
 impl LocalControlSettings {
     pub fn mode(&self) -> LocalControlMode {
         *self.local_control_mode
@@ -209,6 +355,11 @@ impl LocalControlSettings {
 
     pub fn is_enabled(&self) -> bool {
         self.mode().is_enabled()
+    }
+
+    /// Whether the `browser.*` / `pane.glass.*` action family is allowed.
+    pub fn browser_control_allowed(&self) -> bool {
+        *self.allow_browser_control
     }
 }
 

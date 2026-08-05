@@ -737,7 +737,7 @@ impl Window {
             unsafe {
                 (*native_window.cast::<Object>())
                     .set_ivar(WINDOW_STATE_IVAR, Ivar::from_state(&window_state));
-                (*Retained::as_ptr(&native_view).cast::<Object>().cast_mut())
+                (*std::ptr::from_ref(native_view).cast::<Object>().cast_mut())
                     .set_ivar(WINDOW_STATE_IVAR, Ivar::from_state(&window_state));
                 let native_window_delegate = native_window_ref
                     .delegate()

@@ -99,6 +99,11 @@ use warpui::{Entity, ModelContext, ModelSpawner, SingletonEntity};
 #[cfg(any(unix, test))]
 const MAX_ACTIVE_CREDENTIALS: usize = 128;
 
+/// How long the transport waits for a handler's pending (asynchronous)
+/// response — e.g. `browser.eval` / `browser.screenshot`, which complete on
+/// WebKit's schedule — before answering with a timeout error.
+const ASYNC_ACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// App-owned authority shared by one instance's broker and HTTP listener.
 ///
 /// Broker-issued bearer tokens map to grants only in this process-local state.
@@ -201,6 +206,8 @@ impl LocalControlServer {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_io()
+            // Timers back the async-action timeout in `handle_control_request`.
+            .enable_time()
             .build()
             .map_err(|err| {
                 ControlError::with_details(
@@ -580,7 +587,23 @@ async fn handle_control_request(
         .spawn(move |bridge, ctx| bridge.handle_request(request, grant, ctx))
         .await
     {
-        Ok(response) => response,
+        Ok(bridge::HandlerResponse::Ready(response)) => response,
+        Ok(bridge::HandlerResponse::Pending(receiver)) => {
+            match tokio::time::timeout(ASYNC_ACTION_TIMEOUT, receiver).await {
+                Ok(Ok(response)) => response,
+                Ok(Err(_)) => ResponseEnvelope::error(
+                    request_id,
+                    ControlError::new(
+                        ErrorCode::Internal,
+                        "local-control async action was dropped before completing",
+                    ),
+                ),
+                Err(_) => ResponseEnvelope::error(
+                    request_id,
+                    ControlError::new(ErrorCode::Internal, "local-control async action timed out"),
+                ),
+            }
+        }
         Err(_) => ResponseEnvelope::error(
             request_id,
             ControlError::new(

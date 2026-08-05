@@ -581,6 +581,38 @@ fn retained_action_examples() -> Vec<(ActionKind, Vec<&'static str>)> {
             ActionKind::FileOpen,
             vec!["warpctrl", "file", "open", "/tmp/example.txt"],
         ),
+        (
+            ActionKind::BrowserAttach,
+            vec!["warpctrl", "browser", "attach", "https://example.com"],
+        ),
+        (
+            ActionKind::BrowserNavigate,
+            vec!["warpctrl", "browser", "navigate", "https://example.com"],
+        ),
+        (
+            ActionKind::BrowserEval,
+            vec!["warpctrl", "browser", "eval", "document.title"],
+        ),
+        (
+            ActionKind::BrowserScreenshot,
+            vec!["warpctrl", "browser", "screenshot"],
+        ),
+        (
+            ActionKind::BrowserInteractive,
+            vec!["warpctrl", "browser", "interactive", "true"],
+        ),
+        (
+            ActionKind::BrowserStatus,
+            vec!["warpctrl", "browser", "status"],
+        ),
+        (
+            ActionKind::BrowserDetach,
+            vec!["warpctrl", "browser", "detach"],
+        ),
+        (
+            ActionKind::PaneGlassSet,
+            vec!["warpctrl", "pane", "glass", "true", "--opacity", "55"],
+        ),
     ]
 }
 
@@ -637,6 +669,7 @@ fn parsed_action_kind(command: &ControlCommand) -> Option<ActionKind> {
             PaneCommand::Close(_) => Some(ActionKind::PaneClose),
             PaneCommand::Rename(_) => Some(ActionKind::PaneRename),
             PaneCommand::ResetName(_) => Some(ActionKind::PaneResetName),
+            PaneCommand::Glass(_) => Some(ActionKind::PaneGlassSet),
         },
         ControlCommand::Session(command) => match command {
             SessionCommand::List(_) => Some(ActionKind::SessionList),
@@ -679,6 +712,15 @@ fn parsed_action_kind(command: &ControlCommand) -> Option<ActionKind> {
         },
         ControlCommand::File(command) => match command {
             FileCommand::Open(_) => Some(ActionKind::FileOpen),
+        },
+        ControlCommand::Browser(command) => match command {
+            BrowserCommand::Attach(_) => Some(ActionKind::BrowserAttach),
+            BrowserCommand::Navigate(_) => Some(ActionKind::BrowserNavigate),
+            BrowserCommand::Eval(_) => Some(ActionKind::BrowserEval),
+            BrowserCommand::Screenshot(_) => Some(ActionKind::BrowserScreenshot),
+            BrowserCommand::Interactive(_) => Some(ActionKind::BrowserInteractive),
+            BrowserCommand::Status(_) => Some(ActionKind::BrowserStatus),
+            BrowserCommand::Detach(_) => Some(ActionKind::BrowserDetach),
         },
         ControlCommand::Surface(command) => match command {
             SurfaceCommand::List(_) => Some(ActionKind::SurfaceList),

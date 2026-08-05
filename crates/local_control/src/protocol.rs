@@ -77,6 +77,25 @@ pub struct BooleanValueParams {
     pub value: bool,
 }
 
+/// Parameters for `browser.attach`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserAttachParams {
+    pub url: String,
+    /// Whether the targeted pane turns to night glass so the page is visible
+    /// behind it (default true).
+    #[serde(default = "default_true")]
+    pub glass: bool,
+    /// Glass fill opacity override (0-100) for the window; defaults to the
+    /// user's `glass_opacity` setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glass_opacity: Option<u8>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ColorValueParams {
@@ -100,6 +119,13 @@ pub struct FileOpenParams {
     pub column: Option<u32>,
     #[serde(default)]
     pub new_tab: bool,
+}
+
+/// Parameters for `browser.eval`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JavascriptParams {
+    pub javascript: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,6 +155,17 @@ pub struct PageQueryParams {
     pub page: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query: Option<String>,
+}
+
+/// Parameters for `pane.glass.set`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PaneGlassParams {
+    pub enabled: bool,
+    /// Glass fill opacity override (0-100) for the pane's window; defaults to
+    /// the user's `glass_opacity` setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<u8>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,6 +219,13 @@ pub struct TextParams {
 #[serde(deny_unknown_fields)]
 pub struct ThemeNameParams {
     pub theme_name: String,
+}
+
+/// Parameters for `browser.navigate`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UrlParams {
+    pub url: String,
 }
 
 pub type KeybindingGetParams = BindingNameParams;

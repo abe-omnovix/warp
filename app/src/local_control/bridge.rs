@@ -10,12 +10,20 @@ use ::local_control::{
 use warpui::{Entity, ModelContext, SingletonEntity};
 
 use crate::local_control::handlers::{
-    app_state, close, metadata, metadata_config, settings_surfaces,
+    app_state, browser, close, metadata, metadata_config, settings_surfaces,
 };
 use crate::local_control::permissions::{
     ensure_action_allowed, ensure_feature_enabled, ensure_protocol_version,
 };
 use crate::local_control::resolver::{validate_action_params, validate_action_target};
+
+/// A handler's outcome: either a complete response, or a pending response the
+/// transport must await (with a timeout) because the underlying platform call
+/// completes asynchronously (e.g. WebKit JS evaluation and snapshots).
+pub(crate) enum HandlerResponse {
+    Ready(ResponseEnvelope),
+    Pending(tokio::sync::oneshot::Receiver<ResponseEnvelope>),
+}
 
 /// WarpUI model that executes already-authenticated local-control actions.
 pub struct LocalControlBridge {
@@ -42,30 +50,30 @@ impl LocalControlBridge {
         request: RequestEnvelope,
         grant: CredentialGrant,
         ctx: &mut ModelContext<Self>,
-    ) -> ResponseEnvelope {
+    ) -> HandlerResponse {
         if let Err(error) = ensure_feature_enabled() {
-            return ResponseEnvelope::error(request.request_id, error);
+            return HandlerResponse::Ready(ResponseEnvelope::error(request.request_id, error));
         }
         if let Err(error) = ensure_protocol_version(request.protocol_version) {
-            return ResponseEnvelope::error(request.request_id, error);
+            return HandlerResponse::Ready(ResponseEnvelope::error(request.request_id, error));
         }
         let Some(instance_id) = &self.instance_id else {
-            return ResponseEnvelope::error(
+            return HandlerResponse::Ready(ResponseEnvelope::error(
                 request.request_id,
                 ControlError::new(
                     ErrorCode::BridgeUnavailable,
                     "local-control bridge has no active instance identity",
                 ),
-            );
+            ));
         };
         if let Err(error) = validate_request_authority(instance_id, &request.action, &grant) {
-            return ResponseEnvelope::error(request.request_id, error);
+            return HandlerResponse::Ready(ResponseEnvelope::error(request.request_id, error));
         }
         if let Err(error) = ensure_action_allowed(request.action.kind, ctx) {
-            return ResponseEnvelope::error(request.request_id, error);
+            return HandlerResponse::Ready(ResponseEnvelope::error(request.request_id, error));
         }
         if let Err(error) = validate_action_target(request.action.kind, &request.target) {
-            return ResponseEnvelope::error(request.request_id, error);
+            return HandlerResponse::Ready(ResponseEnvelope::error(request.request_id, error));
         }
         let result = match request.action.kind {
             ActionKind::InstanceList => metadata::instance(&self.instance_id),
@@ -186,11 +194,23 @@ impl LocalControlBridge {
             ActionKind::WindowClose => close::window_close(&self.instance_id, &request, ctx),
             ActionKind::TabClose => close::tab_close(&self.instance_id, &request, ctx),
             ActionKind::PaneClose => close::pane_close(&self.instance_id, &request, ctx),
+            ActionKind::BrowserAttach => browser::attach(&self.instance_id, &request, ctx),
+            ActionKind::BrowserNavigate => browser::navigate(&self.instance_id, &request, ctx),
+            ActionKind::BrowserInteractive => {
+                browser::interactive(&self.instance_id, &request, ctx)
+            }
+            ActionKind::BrowserStatus => browser::status(&request, ctx),
+            ActionKind::BrowserDetach => browser::detach(&self.instance_id, &request, ctx),
+            ActionKind::PaneGlassSet => browser::pane_glass_set(&self.instance_id, &request, ctx),
+            // Async handlers: WebKit completes these on its own schedule, so
+            // they hand back a pending receiver the transport awaits.
+            ActionKind::BrowserEval => return browser::eval(&request, ctx),
+            ActionKind::BrowserScreenshot => return browser::screenshot(&request, ctx),
         };
-        match result {
+        HandlerResponse::Ready(match result {
             Ok(data) => ResponseEnvelope::ok(request.request_id, data),
             Err(error) => ResponseEnvelope::error(request.request_id, error),
-        }
+        })
     }
 }
 

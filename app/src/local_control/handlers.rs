@@ -3,6 +3,7 @@ use ::local_control::{ActionKind, InstanceId};
 use serde_json::json;
 
 pub(super) mod app_state;
+pub(super) mod browser;
 pub(super) mod close;
 pub(super) mod layout;
 pub(super) mod metadata;

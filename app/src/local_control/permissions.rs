@@ -56,5 +56,31 @@ pub(crate) fn ensure_settings_allow_action(
             format!("{} is disabled for local control", action.as_str()),
         ));
     }
+    if requires_browser_control(action) && !settings.browser_control_allowed() {
+        return Err(ControlError::new(
+            ErrorCode::InsufficientPermissions,
+            format!(
+                "{} requires the browser-control permission (Settings > Scripting)",
+                action.as_str()
+            ),
+        ));
+    }
     Ok(())
+}
+
+/// Whether an action drives the browser underlay and therefore requires the
+/// separate default-off `allow_browser_control` permission on top of local
+/// control being enabled.
+pub(crate) fn requires_browser_control(action: ActionKind) -> bool {
+    matches!(
+        action,
+        ActionKind::BrowserAttach
+            | ActionKind::BrowserNavigate
+            | ActionKind::BrowserEval
+            | ActionKind::BrowserScreenshot
+            | ActionKind::BrowserInteractive
+            | ActionKind::BrowserStatus
+            | ActionKind::BrowserDetach
+            | ActionKind::PaneGlassSet
+    )
 }

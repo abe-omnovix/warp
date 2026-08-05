@@ -8,7 +8,8 @@ use warpui_extras::secure_storage::{self, AppContextExt as _};
 use warpui_extras::user_preferences;
 
 use super::{
-    LocalControlMode, LocalControlModeSetting, LocalControlSettings, default_mode_for_channel,
+    AllowBrowserControlSetting, LocalControlMode, LocalControlModeSetting, LocalControlSettings,
+    default_mode_for_channel,
 };
 
 #[derive(Default)]
@@ -57,7 +58,15 @@ impl secure_storage::SecureStorage for InMemorySecureStorage {
 fn default_settings() -> LocalControlSettings {
     LocalControlSettings {
         local_control_mode: LocalControlModeSetting::new(None),
+        allow_browser_control: AllowBrowserControlSetting::new(None),
     }
+}
+
+#[test]
+fn browser_control_defaults_to_disallowed() {
+    let settings = default_settings();
+
+    assert!(!settings.browser_control_allowed());
 }
 
 #[test]

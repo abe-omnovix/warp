@@ -487,14 +487,16 @@ pub(crate) fn pane_list(
     let entries = select_pane_entries(target, ActionKind::PaneList, ctx)?;
     let mut panes = Vec::new();
     for entry in entries {
-        let (is_active, has_terminal_session) = entry.pane_group.read(ctx, |pane_group, ctx| {
-            (
-                pane_group.focused_pane_id(ctx) == entry.pane_id,
-                pane_group
-                    .terminal_view_from_pane_id(entry.pane_id, ctx)
-                    .is_some(),
-            )
-        });
+        let (is_active, has_terminal_session, session_uuid) =
+            entry.pane_group.read(ctx, |pane_group, ctx| {
+                (
+                    pane_group.focused_pane_id(ctx) == entry.pane_id,
+                    pane_group
+                        .terminal_view_from_pane_id(entry.pane_id, ctx)
+                        .is_some(),
+                    pane_group.terminal_session_uuid_hex(entry.pane_id),
+                )
+            });
         panes.push(json!({
             "pane_id": entry.pane_id.to_string(),
             "tab_id": entry.tab_id,
@@ -504,6 +506,10 @@ pub(crate) fn pane_list(
             "index": entry.index as u32,
             "is_active": is_active,
             "has_terminal_session": has_terminal_session,
+            // Matches the pane shell's WARP_TERMINAL_SESSION_UUID; null for
+            // non-terminal panes. Lets external tools map an inherited env
+            // identity back to a pane (see specs/browser-underlay/MCP.md).
+            "session_uuid": session_uuid,
         }));
     }
     Ok(json!({
