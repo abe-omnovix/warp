@@ -1,9 +1,10 @@
 # Browser underlay — session handoff
 
-State: Phases 1–3 implemented and committed on `abe/browser-underlay`
+State: **Phases 1–4 implemented and committed** on `abe/browser-underlay`
 (fork `abe-omnovix/warp`, upstream `warpdotdev/warp`, base master `af2f7c61`).
-Phase 1 `ffdf295c`, Phase 2 `114b66ff`, Phase 3 is the commit adding this
-paragraph. Phase 4 (`warp-browser-mcp`) is next; Phase 5 stays documented-only.
+Phase 1 `ffdf295c`, Phase 2 `114b66ff`, Phase 3 `4753b8bc`, Phase 4 is the
+commit adding this paragraph. Phase 5 stays documented-only. Remaining work is
+runtime verification (below), which needs a real Metal build.
 
 ## Standing instruction from Abe
 
@@ -41,17 +42,23 @@ settled — do not re-litigate.
   `--output <path>`). Tests in `local_control/mod_tests.rs` +
   `settings/local_control_tests.rs`.
 
-## Phase 4 notes (beyond MCP.md)
+- **Phase 4 (this commit)** — `crates/warp_browser_mcp` (bin
+  `warp-browser-mcp`): rmcp 1.6 stdio server (`#[tool_router]` +
+  `#[tool_handler]`), tools per MCP.md (`browser_attach|navigate|eval|
+  screenshot|set_glass|set_interactive|status|detach`); binding order
+  implemented as explicit `pane` param → `--pane-session-uuid` (clap
+  env-fallback to `WARP_TERMINAL_SESSION_UUID`) → active pane, resolved fresh
+  per call by matching `session_uuid` in a selector-less `pane.list` (which
+  spans all windows); underlay ops target the bound window id, glass ops the
+  window+tab+pane ids; screenshots return MCP image content; blocking
+  local-control client calls run via `spawn_blocking`. Unit tests in
+  `src/main_tests.rs`.
 
-- Crate `crates/warp_browser_mcp` (workspace glob auto-members it); rmcp is
-  already a workspace dep (server+transport-io+macros); link `local_control`
-  client/discovery/selection directly; spawn processes only via
-  `crates/command` (lint). Pane binding order per MCP.md — resolve the pane by
-  matching `session_uuid` in `pane.list`, then target `browser.*` at the
-  pane's window (`--window` id selector) and `pane.glass.set` at the pane id.
+## Later hooks (out of scope)
+
 - `CallMCPToolExecutor` already holds the calling pane's `terminal_view_id`
   (`app/src/ai/blocklist/action_model/execute/call_mcp_tool.rs:26`) — that's
-  the 4b hook; out of scope now.
+  the Warp-agent auto-bind (4b) hook.
 
 ## Verification environment (updated — supersedes "macOS blocked")
 

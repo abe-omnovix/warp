@@ -9,22 +9,38 @@ Everything is gated by `FeatureFlag::BrowserUnderlay` (macOS only) and, for exte
 
 ## Quickstart: aquarium background
 
-Build with the feature and set the test URL (until the control plane lands):
+Build with the feature:
 
 ```bash
 cargo run -p warp --features browser_underlay
-# with:
-export WARP_BROWSER_UNDERLAY_TEST_URL='https://www.youtube.com/embed/<video-id>?autoplay=1&mute=1&controls=0&loop=1&playlist=<video-id>'
 ```
 
-Every new window attaches an underlay loading that URL. Use YouTube **embed** URLs with `autoplay=1&mute=1` — muted autoplay is always permitted; sound requires interactive mode or a JS unmute.
+Then set the ambience URL in **Settings › Appearance › Browser ambience** (or
+`appearance.browser_ambience.url` in `settings.toml`); every open and future
+window attaches an underlay loading it, and clearing the field detaches them.
+The "Glass opacity" slider next to it controls how translucent the terminal
+fill is. Use YouTube **embed** URLs with `autoplay=1&mute=1` — muted autoplay
+is always permitted; sound requires interactive mode or a JS unmute:
 
-Once the control plane lands (see `TECH.md` Phase 3):
+```
+https://www.youtube.com/embed/<video-id>?autoplay=1&mute=1&controls=0&loop=1&playlist=<video-id>
+```
+
+The `WARP_BROWSER_UNDERLAY_TEST_URL` environment variable still works as a
+smoke-test hook and takes precedence over the setting.
+
+With `allow_browser_control` enabled (Settings › Scripting), the control plane
+does the same per window:
 
 ```bash
-warpctrl browser attach --url 'https://www.youtube.com/embed/...'
+warpctrl browser attach 'https://www.youtube.com/embed/...' --no-glass
+warpctrl browser status
 warpctrl browser detach
 ```
+
+(`attach` without `--no-glass` also turns the targeted pane to night glass —
+that's the agent-browsing porthole; `warpctrl pane glass true|false` toggles
+it independently.)
 
 ## Quickstart: agent browsing via MCP
 
