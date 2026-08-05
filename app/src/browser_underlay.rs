@@ -320,13 +320,24 @@ pub fn agent_detach(pane_key: &str, ctx: &mut AppContext) {
     });
 }
 
-/// Re-resolves every agent underlay's pane location and applies visibility:
-/// an agent underlay is visible only while its pane's tab is frontmost in its
-/// window. Panes that moved windows get their underlay re-homed (the page
-/// reloads); panes that no longer exist get their underlay detached.
+/// Applies agent-underlay visibility for `window_id` after its active tab
+/// changed: an agent underlay is composited only while its pane is part of
+/// the window's newly active tab. An agent recorded against another window
+/// whose pane now shows in this window's active tab is re-homed here —
+/// WKWebViews cannot move between windows, so the page reloads.
 ///
-/// Called from the tab-activation choke point, pane cleanup, and window close.
-pub fn sync_agent_visibility(ctx: &mut AppContext) {
+/// The workspace passes the active tab's pane set in directly because this
+/// runs inside `Workspace::set_active_tab_index`, where the workspace view is
+/// mid-update and must not be re-read: an earlier implementation re-resolved
+/// panes via the workspace view here, every lookup failed while the view was
+/// leased, and healthy underlays were detached as "orphans" on every tab
+/// switch. Actual pane teardown is handled by [`pane_closed`] /
+/// [`window_closed`], not by failing lookups.
+pub fn window_active_tab_changed(
+    window_id: WindowId,
+    active_pane_ids: &HashSet<PaneId>,
+    ctx: &mut AppContext,
+) {
     if !ctx.has_singleton_model::<BrowserUnderlayState>() {
         return;
     }
@@ -342,52 +353,34 @@ pub fn sync_agent_visibility(ctx: &mut AppContext) {
             )
         })
         .collect();
-    for (pane_key, pane_id, window_id, url, was_visible) in agents {
+    for (pane_key, pane_id, agent_window, url, was_visible) in agents {
         let owner = BrowserUnderlayOwner::Agent(pane_key.clone());
-        match locate_pane(pane_id, ctx) {
-            None => {
-                // Pane is gone (closed, or its window is closing).
-                agent_detach(&pane_key, ctx);
+        if agent_window == window_id {
+            let now_visible = active_pane_ids.contains(&pane_id);
+            if now_visible != was_visible {
+                ctx.windows()
+                    .set_background_webview_visible(window_id, &owner, now_visible);
+                BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+                    state.set_agent_visible(&pane_key, now_visible, ctx);
+                });
             }
-            Some(location) if location.window_id != window_id => {
-                // The pane moved to another window: re-home the underlay.
-                // WKWebViews cannot move between windows, so this reloads the
-                // page in the new window.
-                ctx.windows().detach_background_webview(window_id, &owner);
-                if ctx
-                    .windows()
-                    .attach_background_webview(location.window_id, &owner, &url)
-                {
-                    ctx.windows().set_background_webview_visible(
-                        location.window_id,
-                        &owner,
-                        location.in_active_tab,
-                    );
-                    BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                        state.agent_moved(
-                            &pane_key,
-                            location.window_id,
-                            location.in_active_tab,
-                            ctx,
-                        );
-                    });
-                } else {
-                    BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                        state.remove_agent(&pane_key, ctx);
-                    });
-                }
-            }
-            Some(location) => {
-                if location.in_active_tab != was_visible {
-                    ctx.windows().set_background_webview_visible(
-                        window_id,
-                        &owner,
-                        location.in_active_tab,
-                    );
-                    BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
-                        state.set_agent_visible(&pane_key, location.in_active_tab, ctx);
-                    });
-                }
+        } else if active_pane_ids.contains(&pane_id) {
+            // The pane moved into this window since the underlay attached.
+            ctx.windows()
+                .detach_background_webview(agent_window, &owner);
+            if ctx
+                .windows()
+                .attach_background_webview(window_id, &owner, &url)
+            {
+                ctx.windows()
+                    .set_background_webview_visible(window_id, &owner, true);
+                BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+                    state.agent_moved(&pane_key, window_id, true, ctx);
+                });
+            } else {
+                BrowserUnderlayState::handle(ctx).update(ctx, |state, ctx| {
+                    state.remove_agent(&pane_key, ctx);
+                });
             }
         }
     }

@@ -212,6 +212,21 @@ BOOL browser_underlay_attach(NSWindow *window, const char *owner, const char *ur
         underlay.owner = ownerString;
         underlay.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 
+        // Never paint white where the page hasn't painted: blank pages,
+        // loads in flight, and failed navigations (e.g. a dev server that
+        // is not up yet) would otherwise white-wash the whole window
+        // through the glass. With a clear background those states show the
+        // dark window behind instead.
+        if (@available(macOS 12.3, *)) {
+            underlay.underPageBackgroundColor = [NSColor clearColor];
+        }
+        @try {
+            [underlay setValue:@NO forKey:@"drawsBackground"];
+        } @catch (NSException *exception) {
+            // The KVC key is long-standing WebKit API surface; if it ever
+            // disappears the underlay just keeps its default background.
+        }
+
         if (isAmbience) {
             // The ambience underlay lives at the very back, behind any agent
             // underlays.

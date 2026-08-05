@@ -5465,8 +5465,16 @@ impl Workspace {
         self.update_active_session(ctx);
 
         // Agent browser underlays are visible only while their pane's tab is
-        // frontmost; every tab-activation path funnels through here.
-        crate::browser_underlay::sync_agent_visibility(ctx);
+        // frontmost; every tab-activation path funnels through here. The
+        // active tab's pane set is handed over directly — this view is
+        // mid-update, so the underlay layer must not read it back.
+        let active_pane_ids = self
+            .active_tab_pane_group()
+            .as_ref(ctx)
+            .visible_pane_ids()
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        crate::browser_underlay::window_active_tab_changed(self.window_id, &active_pane_ids, ctx);
     }
 
     fn update_window_title(&self, ctx: &mut ViewContext<Self>) {
